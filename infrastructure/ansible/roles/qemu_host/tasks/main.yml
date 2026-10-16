@@ -1,0 +1,116 @@
+---
+- name: Require a Debian-family hypervisor
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == "Debian"
+    fail_msg: "The QEMU host role currently supports Debian and Ubuntu hosts."
+
+- name: Verify CPU virtualization extensions are exposed
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -E -c '(vmx|svm)' /proc/cpuinfo
+  args:
+    executable: /bin/bash
+  register: virtualization_extensions
+  changed_when: false
+  failed_when: virtualization_extensions.stdout | int == 0
+
+- name: Install QEMU, libvirt, and virtio support
+  ansible.builtin.apt:
+    name: "{{ qemu_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Load KVM and accelerated virtio-net modules at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/cs740-kvm.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      kvm
+      vhost_net
+
+- name: Load virtualization kernel modules now
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop:
+    - kvm
+    - vhost_net
+  changed_when: false
+
+- name: Enable and start libvirt
+  ansible.builtin.service:
+    name: libvirtd
+    enabled: true
+    state: started
+
+- name: Grant deployment users access to KVM and libvirt
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups:
+      - kvm
+      - libvirt
+    append: true
+  loop: "{{ qemu_admin_users }}"
+
+- name: Check whether the default libvirt network exists
+  ansible.builtin.command: virsh net-info default
+  register: default_network
+  changed_when: false
+  failed_when: false
+
+- name: Define the packaged default libvirt network
+  ansible.builtin.command: virsh net-define /usr/share/libvirt/networks/default.xml
+  when: default_network.rc != 0
+  changed_when: true
+
+- name: Read default libvirt network status
+  ansible.builtin.command: virsh net-info default
+  register: default_network_status
+  changed_when: false
+
+- name: Enable autostart for the default libvirt network
+  ansible.builtin.command: virsh net-autostart default
+  changed_when: false
+
+- name: Start the default libvirt network
+  ansible.builtin.command: virsh net-start default
+  when: default_network_status.stdout is not search('Active:\s+yes')
+  changed_when: true
+
+- name: Check whether the default storage pool exists
+  ansible.builtin.command: virsh pool-info default
+  register: default_pool
+  changed_when: false
+  failed_when: false
+
+- name: Define the default directory storage pool
+  ansible.builtin.command: >-
+    virsh pool-define-as default dir --target /var/lib/libvirt/images
+  when: default_pool.rc != 0
+  changed_when: true
+
+- name: Read default storage pool status
+  ansible.builtin.command: virsh pool-info default
+  register: default_pool_status
+  changed_when: false
+
+- name: Enable autostart for the default storage pool
+  ansible.builtin.command: virsh pool-autostart default
+  changed_when: false
+
+- name: Start the default storage pool
+  ansible.builtin.command: virsh pool-start default
+  when: default_pool_status.stdout is not search('State:\s+running')
+  changed_when: true
+
+- name: Verify KVM device access
+  ansible.builtin.stat:
+    path: /dev/kvm
+  register: kvm_device
+  failed_when: not kvm_device.stat.exists
+
+- name: Verify libvirt can query QEMU capabilities
+  ansible.builtin.command: virsh -c qemu:///system capabilities
+  changed_when: false

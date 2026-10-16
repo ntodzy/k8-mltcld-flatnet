@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CS740 QEMU deployment",
+  "type": "object",
+  "required": ["project_name", "ssh", "image", "hypervisors"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "project_name": { "type": "string", "minLength": 1 },
+    "ssh": {
+      "type": "object",
+      "required": ["user", "private_key_file", "public_key_file"],
+      "properties": {
+        "user": { "type": "string", "minLength": 1 },
+        "private_key_file": { "type": "string", "minLength": 1 },
+        "public_key_file": { "type": "string", "minLength": 1 },
+        "common_args": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "default": "qcow2" }
+      },
+      "additionalProperties": false
+    },
+    "defaults": {
+      "$ref": "#/$defs/defaults"
+    },
+    "hypervisors": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/hypervisor" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "storage_pool": { "type": "string", "default": "default" },
+        "vm_user": { "type": "string", "default": "ubuntu" },
+        "disable_apparmor": { "type": "boolean", "default": true },
+        "vcpu": { "type": "integer", "minimum": 1, "default": 2 },
+        "memory_mib": { "type": "integer", "minimum": 512, "default": 4096 },
+        "disk_gib": { "type": "integer", "minimum": 8, "default": 30 },
+        "gateway_ipv4": { "type": ["string", "null"] },
+        "dns_servers": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "required": ["mode", "source"],
+      "properties": {
+        "mode": { "enum": ["direct", "bridge", "network"] },
+        "source": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "management_network": {
+      "type": "object",
+      "required": ["source", "cidr"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "cidr": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "vm": {
+      "type": "object",
+      "required": ["name", "role", "management_mac_address", "mac_address"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.-]*$" },
+        "role": { "type": "string", "minLength": 1 },
+        "management_mac_address": { "type": "string", "pattern": "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" },
+        "mac_address": { "type": "string", "pattern": "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" },
+        "vcpu": { "type": "integer", "minimum": 1 },
+        "memory_mib": { "type": "integer", "minimum": 512 },
+        "disk_gib": { "type": "integer", "minimum": 8 },
+        "ipv4_address": { "type": ["string", "null"] },
+        "gateway_ipv4": { "type": ["string", "null"] },
+        "dns_servers": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "hypervisor": {
+      "type": "object",
+      "required": ["name", "address", "network", "management_network", "vms"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$" },
+        "address": { "type": "string", "minLength": 1 },
+        "libvirt_uri": { "type": "string", "minLength": 1 },
+        "storage_pool": { "type": "string", "minLength": 1 },
+        "disable_apparmor": { "type": "boolean" },
+        "network": { "$ref": "#/$defs/network" },
+        "management_network": { "$ref": "#/$defs/management_network" },
+        "vms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/vm" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

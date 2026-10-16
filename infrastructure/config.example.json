@@ -1,0 +1,82 @@
+{
+  "$schema": "./config.schema.json",
+  "project_name": "cs740",
+  "ssh": {
+    "user": "your-cloudlab-user",
+    "private_key_file": "~/.ssh/id_ed25519",
+    "public_key_file": "~/.ssh/id_ed25519.pub",
+    "common_args": "-o StrictHostKeyChecking=accept-new"
+  },
+  "image": {
+    "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+    "format": "qcow2"
+  },
+  "defaults": {
+    "storage_pool": "default",
+    "vm_user": "ubuntu",
+    "disable_apparmor": true,
+    "vcpu": 2,
+    "memory_mib": 4096,
+    "disk_gib": 30,
+    "gateway_ipv4": null,
+    "dns_servers": ["1.1.1.1", "8.8.8.8"]
+  },
+  "hypervisors": [
+    {
+      "name": "node1",
+      "address": "node1.example.cloudlab.us",
+      "network": {
+        "mode": "direct",
+        "source": "enp130s0f0"
+      },
+      "management_network": {
+        "source": "default",
+        "cidr": "192.168.122.0/24"
+      },
+      "vms": [
+        {
+          "name": "control-1",
+          "role": "controller",
+          "management_mac_address": "52:54:00:74:11:11",
+          "mac_address": "52:54:00:74:01:11",
+          "ipv4_address": "10.74.0.11/24"
+        },
+        {
+          "name": "worker-1",
+          "role": "worker",
+          "management_mac_address": "52:54:00:74:11:12",
+          "mac_address": "52:54:00:74:01:12",
+          "ipv4_address": "10.74.0.12/24"
+        }
+      ]
+    },
+    {
+      "name": "node2",
+      "address": "node2.example.cloudlab.us",
+      "network": {
+        "mode": "direct",
+        "source": "enp130s0f0"
+      },
+      "management_network": {
+        "source": "default",
+        "cidr": "192.168.122.0/24"
+      },
+      "vms": [
+        {
+          "name": "worker-2",
+          "role": "worker",
+          "management_mac_address": "52:54:00:74:12:11",
+          "mac_address": "52:54:00:74:02:11",
+          "ipv4_address": "10.74.0.21/24"
+        },
+        {
+          "name": "worker-3",
+          "role": "worker",
+          "management_mac_address": "52:54:00:74:12:12",
+          "mac_address": "52:54:00:74:02:12",
+          "ipv4_address": "10.74.0.22/24"
+        }
+      ]
+    }
+  ]
+}

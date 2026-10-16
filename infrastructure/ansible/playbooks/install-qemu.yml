@@ -1,0 +1,7 @@
+---
+- name: Install and configure QEMU/KVM hypervisors
+  hosts: hypervisors
+  become: true
+  gather_facts: true
+  roles:
+    - role: qemu_host

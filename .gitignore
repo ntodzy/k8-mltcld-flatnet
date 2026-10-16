@@ -1,0 +1,9 @@
+# Terraform working data and per-hypervisor state.
+infrastructure/terraform/.terraform/
+infrastructure/terraform/state/
+infrastructure/terraform/*.tfplan
+infrastructure/generated/
+
+# Local deployment configuration may contain hostnames and key paths.
+infrastructure/config.json
+

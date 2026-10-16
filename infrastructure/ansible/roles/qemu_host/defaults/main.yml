@@ -1,0 +1,11 @@
+---
+qemu_admin_users: []
+qemu_packages:
+  - bridge-utils
+  - cloud-image-utils
+  - libvirt-clients
+  - libvirt-daemon-system
+  - python3-libvirt
+  - qemu-system-x86
+  - qemu-utils
+  - virtinst
