@@ -1,0 +1,31 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ kubernetes_node_ip }}
+  bindPort: 6443
+nodeRegistration:
+  criSocket: {{ kubernetes_cri_socket }}
+  name: {{ inventory_hostname }}
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ kubernetes_node_ip }}
+  taints:
+    - key: node-role.kubernetes.io/control-plane
+      effect: NoSchedule
+    - key: node.cilium.io/agent-not-ready
+      effect: NoExecute
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: cs740
+kubernetesVersion: {{ kubernetes_version }}
+controlPlaneEndpoint: "{{ kubernetes_node_ip }}:6443"
+apiServer:
+  certSANs:
+    - {{ kubernetes_node_ip }}
+networking:
+  dnsDomain: {{ kubernetes_dns_domain }}
+  podSubnet: {{ kubernetes_pod_subnet }}
+  serviceSubnet: {{ kubernetes_service_subnet }}
+

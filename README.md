@@ -169,3 +169,64 @@ generated AppArmor profile. The host's AppArmor service stays enabled, and
 libvirt's DAC file ownership checks remain active. Set it to `false` globally
 under `defaults`, or per hypervisor, when the host's libvirt AppArmor profiles
 can access the storage pool normally.
+
+### Kubernetes and Cilium networking
+
+After the VMs have been created, build the Kubernetes layer from the generated
+guest inventory:
+
+```bash
+# This is entirely local and safe to run without an active CloudLab reservation.
+infrastructure/cluster.sh validate
+
+# This contacts the guests through their hypervisor jump hosts.
+infrastructure/cluster.sh apply
+```
+
+The cluster consists of the single VM whose role is `controller` and every VM
+whose role is `worker`. The example therefore creates one control-plane node
+and three workers across the two physical hosts. All Kubernetes components use
+the static `experiment_ipv4`; the DHCP management addresses are used only for
+SSH through the hypervisors.
+
+The versions and cluster CIDRs are pinned in
+[`infrastructure/kubernetes/cluster-config.yml`](infrastructure/kubernetes/cluster-config.yml).
+The playbook installs containerd and kubeadm, initializes the control plane,
+joins the workers with short-lived bootstrap credentials, and installs Cilium.
+Kubernetes allocates a `/24` PodCIDR to each node from `10.244.0.0/16`, and
+Cilium always binds the datapath to the `experiment` interface. Kube-proxy
+remains enabled in both profiles so the comparison changes Pod forwarding
+without also changing Service handling.
+
+VXLAN remains the default and can also be selected explicitly:
+
+```bash
+infrastructure/cluster.sh --network-mode vxlan apply
+```
+
+For the flat-IP experiment, select Cilium native routing (`flat` is accepted as
+an alias for `native`):
+
+```bash
+infrastructure/cluster.sh --network-mode native apply
+```
+
+The native profile sets `ipv4NativeRoutingCIDR` to `10.244.0.0/16` and enables
+`autoDirectNodeRoutes`. Cilium passes inter-node Pod traffic to the Linux
+routing stack and installs a route for each remote PodCIDR through the owning
+node's `experiment_ipv4`. Traffic within the Pod CIDR is not source-NATed, so
+the flat Pod addresses remain visible end to end. This relies on the experiment
+interfaces sharing one layer-2 segment, as they do in the designed CloudLab
+topology. Traffic outside the native Pod CIDR retains Cilium's normal egress
+masquerading in both profiles.
+
+The experiment LAN must permit node-to-node Kubernetes API traffic (TCP 6443),
+Cilium health checks (TCP 4240 and ICMP), and the normal kubeadm control-plane
+traffic. The VXLAN profile additionally requires UDP 8472. The native profile
+requires the LAN to forward the allocated Pod CIDRs through the node addresses.
+The playbook does not manage host firewall rules; it assumes that the
+experiment LAN is unfiltered or that these flows are allowed out of band.
+
+The deployment is intentionally separate from `deploy.sh`: a new reservation
+can update the hypervisor endpoints in `config.json`, recreate the same VM
+topology, and then run `cluster.sh apply` without changing cluster automation.

@@ -1,0 +1,20 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "{{ hostvars[groups['kubernetes_controllers'][0]].kubernetes_node_ip }}:6443"
+    token: {{ hostvars[groups['kubernetes_controllers'][0]].kubernetes_join_token }}
+    caCertHashes:
+      - {{ hostvars[groups['kubernetes_controllers'][0]].kubernetes_discovery_ca_hash }}
+  tlsBootstrapToken: {{ hostvars[groups['kubernetes_controllers'][0]].kubernetes_join_token }}
+nodeRegistration:
+  criSocket: {{ kubernetes_cri_socket }}
+  name: {{ inventory_hostname }}
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ kubernetes_node_ip }}
+  taints:
+    - key: node.cilium.io/agent-not-ready
+      effect: NoExecute
+

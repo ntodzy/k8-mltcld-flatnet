@@ -1,0 +1,143 @@
+---
+- name: Map the guest architecture to a Helm release architecture
+  ansible.builtin.set_fact:
+    helm_architecture: >-
+      {{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] |
+         default('unsupported') }}
+
+- name: Require an architecture supported by the pinned Helm release
+  ansible.builtin.assert:
+    that:
+      - helm_architecture != 'unsupported'
+    fail_msg: "Unsupported Helm architecture: {{ ansible_facts.architecture }}"
+
+- name: Create the pinned Helm installation directory
+  ansible.builtin.file:
+    path: "/opt/helm-{{ helm_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download and verify the pinned Helm release
+  ansible.builtin.get_url:
+    url: >-
+      https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_architecture }}.tar.gz
+    dest: "/opt/helm-{{ helm_version }}/helm.tar.gz"
+    checksum: >-
+      sha256:https://get.helm.sh/helm-{{ helm_version }}-linux-{{ helm_architecture }}.tar.gz.sha256sum
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract the pinned Helm release
+  ansible.builtin.unarchive:
+    src: "/opt/helm-{{ helm_version }}/helm.tar.gz"
+    dest: "/opt/helm-{{ helm_version }}"
+    remote_src: true
+    creates: "/opt/helm-{{ helm_version }}/linux-{{ helm_architecture }}/helm"
+
+- name: Install the Helm executable
+  ansible.builtin.copy:
+    src: "/opt/helm-{{ helm_version }}/linux-{{ helm_architecture }}/helm"
+    remote_src: true
+    dest: /usr/local/bin/helm
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the selected Cilium network values
+  ansible.builtin.template:
+    src: values.yml.j2
+    dest: /etc/kubernetes/cilium-values.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install or reconcile Cilium
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - upgrade
+      - --install
+      - cilium
+      - oci://quay.io/cilium/charts/cilium
+      - --version
+      - "{{ cilium_version }}"
+      - --namespace
+      - kube-system
+      - --values
+      - /etc/kubernetes/cilium-values.yml
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --wait
+      - --timeout
+      - 10m
+  register: cilium_helm
+  changed_when: >-
+    'has been installed' in cilium_helm.stdout or
+    'has been upgraded' in cilium_helm.stdout
+
+- name: Wait for every Kubernetes node to become ready
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - wait
+      - --for=condition=Ready
+      - nodes
+      - --all
+      - --timeout=10m
+  changed_when: false
+
+- name: Read the active Cilium routing mode
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --namespace=kube-system
+      - get
+      - configmap/cilium-config
+      - --output=jsonpath={.data.routing-mode}
+  register: cilium_active_routing_mode
+  changed_when: false
+
+- name: Read the active Cilium direct-route setting
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --namespace=kube-system
+      - get
+      - configmap/cilium-config
+      - --output=jsonpath={.data.auto-direct-node-routes}
+  register: cilium_active_direct_routes
+  changed_when: false
+
+- name: Verify the requested Cilium network profile is active
+  ansible.builtin.assert:
+    that:
+      - cilium_active_routing_mode.stdout == ('tunnel' if cilium_network_mode == 'vxlan' else 'native')
+      - cilium_active_direct_routes.stdout == ('false' if cilium_network_mode == 'vxlan' else 'true')
+    fail_msg: >-
+      Cilium did not activate the requested {{ cilium_network_mode }} network
+      profile.
+
+- name: Show the final node placement and addresses
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - get
+      - nodes
+      - -o
+      - wide
+  register: kubernetes_nodes
+  changed_when: false
+
+- name: Report the ready cluster
+  ansible.builtin.debug:
+    msg:
+      - "Cilium network mode: {{ cilium_network_mode }}"
+      - "{{ kubernetes_nodes.stdout_lines }}"
+

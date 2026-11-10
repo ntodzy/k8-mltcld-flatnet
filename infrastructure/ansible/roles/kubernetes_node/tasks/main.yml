@@ -1,0 +1,161 @@
+---
+- name: Require a supported Debian-family guest
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.kernel is version('5.10', '>=')
+    fail_msg: >-
+      Kubernetes provisioning currently supports Debian-family guests with a
+      kernel new enough for Cilium (5.10 or newer).
+
+- name: Verify the experiment interface owns the configured node address
+  ansible.builtin.command: "ip -4 address show dev experiment"
+  register: experiment_interface
+  changed_when: false
+  failed_when: >-
+    experiment_interface.rc != 0 or
+    ('inet ' + kubernetes_node_ip + '/') not in experiment_interface.stdout
+
+- name: Disable swap immediately
+  ansible.builtin.command: swapoff -a
+  when: ansible_facts.swaptotal_mb | int > 0
+  changed_when: true
+
+- name: Disable configured swap at boot
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*[^#]\S+\s+\S+\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Load Kubernetes networking modules at boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/cs740-kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+      vxlan
+
+- name: Load Kubernetes networking modules now
+  ansible.builtin.command: "modprobe {{ item }}"
+  loop:
+    - overlay
+    - br_netfilter
+    - vxlan
+  changed_when: false
+
+- name: Configure forwarding and bridged packet handling
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-cs740-kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+  register: kubernetes_sysctl
+
+- name: Apply Kubernetes sysctls
+  ansible.builtin.command: sysctl --system
+  when: kubernetes_sysctl.changed
+  changed_when: true
+
+- name: Install container runtime and repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - containerd
+      - curl
+      - gpg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Generate the distribution's default containerd configuration
+  ansible.builtin.command: containerd config default
+  register: containerd_default_config
+  changed_when: false
+
+- name: Configure containerd to use the systemd cgroup driver
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+    content: >-
+      {{ containerd_default_config.stdout |
+         regex_replace('SystemdCgroup = false', 'SystemdCgroup = true') }}
+  notify: Restart containerd
+
+- name: Create the APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Kubernetes repository signing key
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the versioned Kubernetes package repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/kubernetes.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: >-
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc]
+      https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/ /
+
+- name: Install the pinned Kubernetes node packages
+  ansible.builtin.apt:
+    name:
+      - "kubeadm={{ kubernetes_package_version }}"
+      - "kubectl={{ kubernetes_package_version }}"
+      - "kubelet={{ kubernetes_package_version }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    allow_downgrade: true
+    allow_change_held_packages: true
+
+- name: Hold the Kubernetes node packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubeadm
+    - kubectl
+    - kubelet
+
+- name: Pin kubelet to the experiment network address
+  ansible.builtin.copy:
+    dest: /etc/default/kubelet
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      KUBELET_EXTRA_ARGS=--node-ip={{ kubernetes_node_ip }}
+  notify: Restart kubelet
+
+- name: Start the container runtime and kubelet
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - containerd
+    - kubelet
+
+- name: Apply service configuration before kubeadm runs
+  ansible.builtin.meta: flush_handlers
+

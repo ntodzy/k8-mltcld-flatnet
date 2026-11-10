@@ -1,0 +1,32 @@
+{% if cilium_network_mode == 'vxlan' %}
+# Encapsulated baseline: Pod traffic between nodes uses a VXLAN overlay.
+routingMode: tunnel
+tunnelProtocol: vxlan
+tunnelPort: 8472
+autoDirectNodeRoutes: false
+{% else %}
+# Flat profile: pass each Kubernetes-assigned PodCIDR through the host routing
+# stack and install a direct route through the owning node on the shared L2.
+routingMode: native
+ipv4NativeRoutingCIDR: {{ kubernetes_pod_subnet }}
+autoDirectNodeRoutes: true
+{% endif %}
+devices: experiment
+
+ipam:
+  mode: kubernetes
+k8s:
+  requireIPv4PodCIDR: true
+
+# Retain kube-proxy so that only the pod-network forwarding mode changes between
+# experiments. This avoids conflating VXLAN/native routing with service handling.
+kubeProxyReplacement: false
+enableIPv4Masquerade: true
+
+# A profile change updates cilium-config; roll the agents so that the new
+# routing datapath takes effect during the same deployment.
+rollOutCiliumPods: true
+
+operator:
+  replicas: 1
+

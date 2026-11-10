@@ -1,0 +1,85 @@
+---
+- name: Classify Kubernetes nodes from the generated inventory
+  hosts: virtual_machines
+  gather_facts: false
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  tasks:
+    - name: Validate the node's cluster metadata
+      ansible.builtin.assert:
+        that:
+          - cs740_role is defined
+          - cs740_role in ['controller', 'worker']
+          - experiment_ipv4 is defined
+          - experiment_ipv4 is string
+          - experiment_ipv4 | length > 0
+          - experiment_ipv4 != 'null'
+        fail_msg: >-
+          Every VM requires a controller/worker cs740_role and a static
+          experiment_ipv4 in the generated inventory.
+
+    - name: Record the address Kubernetes must use
+      ansible.builtin.set_fact:
+        kubernetes_node_ip: "{{ experiment_ipv4.split('/')[0] }}"
+
+    - name: Create the runtime controller and worker groups
+      ansible.builtin.group_by:
+        key: "kubernetes_{{ 'controllers' if cs740_role == 'controller' else 'workers' }}"
+
+- name: Validate the complete Kubernetes topology
+  hosts: virtual_machines
+  gather_facts: false
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  tasks:
+    - name: Require one controller and at least one worker
+      ansible.builtin.assert:
+        that:
+          - groups.get('kubernetes_controllers', []) | length == 1
+          - groups.get('kubernetes_workers', []) | length >= 1
+          - cilium_network_mode in ['vxlan', 'native']
+          - >-
+            groups['virtual_machines'] | map('extract', hostvars, 'kubernetes_node_ip') |
+            list | unique | length == groups['virtual_machines'] | length
+        fail_msg: >-
+          This architecture requires exactly one controller, one or more
+          workers, a unique experiment IPv4 address for every VM, and a Cilium
+          network mode of vxlan or native.
+      run_once: true
+
+- name: Prepare every Kubernetes node
+  hosts: virtual_machines
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  roles:
+    - role: kubernetes_node
+
+- name: Initialize the control plane
+  hosts: kubernetes_controllers
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  roles:
+    - role: kubernetes_control_plane
+
+- name: Join the worker nodes
+  hosts: kubernetes_workers
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  roles:
+    - role: kubernetes_worker
+
+- name: Install the selected Cilium pod network
+  hosts: kubernetes_controllers
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  roles:
+    - role: cilium
+

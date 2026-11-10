@@ -1,0 +1,16 @@
+---
+# Cilium 1.20.x is tested against Kubernetes 1.36. Keep the package version,
+# kubeadm control-plane version, and repository minor version in sync.
+kubernetes_version: v1.36.6
+kubernetes_minor_version: v1.36
+kubernetes_package_version: 1.36.6-1.1
+
+kubernetes_pod_subnet: 10.244.0.0/16
+kubernetes_service_subnet: 10.96.0.0/12
+kubernetes_dns_domain: cluster.local
+kubernetes_cri_socket: unix:///run/containerd/containerd.sock
+
+cilium_version: 1.20.4
+cilium_network_mode: vxlan
+helm_version: v4.3.1
+
