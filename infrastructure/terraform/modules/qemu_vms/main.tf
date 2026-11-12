@@ -48,12 +48,9 @@ locals {
   }
 }
 
-resource "libvirt_volume" "system" {
-  for_each = var.vms
-
-  name     = "${var.project_name}-${each.key}.${var.image.format}"
-  pool     = var.storage_pool
-  capacity = each.value.disk_gib * 1024 * 1024 * 1024
+resource "libvirt_volume" "base" {
+  name = "${var.project_name}-base.${var.image.format}"
+  pool = var.storage_pool
 
   target = {
     format = { type = var.image.format }
@@ -61,6 +58,24 @@ resource "libvirt_volume" "system" {
 
   create = {
     content = { url = var.image.url }
+  }
+}
+
+resource "libvirt_volume" "system" {
+  for_each = var.vms
+
+  name          = "${var.project_name}-${each.key}-disk.${var.image.format}"
+  pool          = var.storage_pool
+  capacity      = each.value.disk_gib
+  capacity_unit = "GiB"
+
+  target = {
+    format = { type = var.image.format }
+  }
+
+  backing_store = {
+    path   = libvirt_volume.base.path
+    format = { type = var.image.format }
   }
 }
 

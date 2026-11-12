@@ -77,7 +77,8 @@ jq -e '
   ($hosts | type == "object" and length >= 2) and
   (all($hosts[];
     (.cs740_role == "controller" or .cs740_role == "worker") and
-    (.experiment_ipv4 | type == "string" and test("^[0-9.]+/[0-9]+$"))
+    (.experiment_ipv4 | type == "string" and test("^[0-9.]+/[0-9]+$")) and
+    (.disk_gib | type == "number" and floor == . and . >= 8)
   )) and
   ([$hosts[] | select(.cs740_role == "controller")] | length == 1) and
   ([$hosts[] | select(.cs740_role == "worker")] | length >= 1) and

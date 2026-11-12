@@ -11,6 +11,7 @@ kubernetes_dns_domain: cluster.local
 kubernetes_cri_socket: unix:///run/containerd/containerd.sock
 
 cilium_version: 1.20.4
+cilium_cli_version: v0.20.1
 cilium_network_mode: vxlan
 helm_version: v4.3.1
 

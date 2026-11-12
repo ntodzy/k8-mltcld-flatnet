@@ -7,6 +7,7 @@
             "ansible_host": "192.0.2.11",
             "ansible_user": "ubuntu",
             "cs740_role": "controller",
+            "disk_gib": 30,
             "experiment_ipv4": "10.74.0.11/24",
             "hypervisor": "node1"
           },
@@ -14,6 +15,7 @@
             "ansible_host": "192.0.2.12",
             "ansible_user": "ubuntu",
             "cs740_role": "worker",
+            "disk_gib": 30,
             "experiment_ipv4": "10.74.0.12/24",
             "hypervisor": "node1"
           },
@@ -21,6 +23,7 @@
             "ansible_host": "192.0.2.21",
             "ansible_user": "ubuntu",
             "cs740_role": "worker",
+            "disk_gib": 30,
             "experiment_ipv4": "10.74.0.21/24",
             "hypervisor": "node2"
           },
@@ -28,6 +31,7 @@
             "ansible_host": "192.0.2.22",
             "ansible_user": "ubuntu",
             "cs740_role": "worker",
+            "disk_gib": 30,
             "experiment_ipv4": "10.74.0.22/24",
             "hypervisor": "node2"
           }

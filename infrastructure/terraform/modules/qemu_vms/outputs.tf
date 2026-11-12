@@ -12,6 +12,9 @@ output "virtual_machines" {
       ])), null)
       mac_address    = lower(var.vms[name].mac_address)
       ipv4_address   = var.vms[name].ipv4_address
+      disk_gib       = var.vms[name].disk_gib
+      disk_volume    = libvirt_volume.system[name].name
+      base_volume    = libvirt_volume.base.name
       network_mode   = var.network.mode
       network_source = var.network.source
     }

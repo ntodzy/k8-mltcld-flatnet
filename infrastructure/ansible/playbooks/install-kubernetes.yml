@@ -14,9 +14,12 @@
           - experiment_ipv4 is string
           - experiment_ipv4 | length > 0
           - experiment_ipv4 != 'null'
+          - disk_gib is defined
+          - disk_gib is number
+          - disk_gib | int >= 8
         fail_msg: >-
           Every VM requires a controller/worker cs740_role and a static
-          experiment_ipv4 in the generated inventory.
+          experiment_ipv4 and disk_gib in the generated inventory.
 
     - name: Record the address Kubernetes must use
       ansible.builtin.set_fact:

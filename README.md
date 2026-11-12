@@ -115,10 +115,12 @@ than two hosts without hard-coded provider aliases.
 ### Networking
 
 All guest disks and NICs use virtio. Each VM has two NICs: a management NIC on
-libvirt's NAT network and an experiment NIC on the CloudLab LAN. The Ansible role installs QEMU/libvirt,
-loads KVM and `vhost_net`, starts libvirt, grants the SSH user access to the
-`kvm` and `libvirt` groups, and creates/starts the default network and storage
-pool when absent.
+libvirt's NAT network and an experiment NIC on the CloudLab LAN. On the current
+CloudLab hosts, `eno1` is the host-management interface, `eno1d1` is the
+experiment LAN interface, and `virbr0` backs libvirt's `default` management
+network. The Ansible role installs QEMU/libvirt, loads KVM and `vhost_net`,
+starts libvirt, grants the SSH user access to the `kvm` and `libvirt` groups,
+and creates/starts the default network and storage pool when absent.
 
 The management NIC obtains an address from the libvirt `default` network. It is
 reachable from its hypervisor, so the hypervisor acts as the SSH jump host. The
@@ -126,7 +128,7 @@ experiment NIC uses the hypervisor's `network` object, which supports:
 
 - `direct`: macvtap bridge mode over an existing physical interface, such as a
   CloudLab experiment LAN NIC. This is the example default and avoids changing
-  host network configuration. The example connects it to `enp130s0f0`.
+  host network configuration. The example connects it to `eno1d1`.
 - `bridge`: attach to an existing Linux bridge. The bridge must be configured
   out of band because moving a live management NIC into a bridge can sever SSH.
 - `network`: attach to a named libvirt network, such as `default`. The default
@@ -134,7 +136,8 @@ experiment NIC uses the hypervisor's `network` object, which supports:
   shared layer-2 network between hosts.
 
 After a successful apply, the script discovers every management DHCP address
-and writes two local artifacts under `infrastructure/generated/`:
+and writes local SSH, inventory, and host-key artifacts under
+`infrastructure/generated/`:
 
 ```bash
 # Connect to a guest through its assigned hypervisor.
@@ -143,6 +146,13 @@ ssh -F infrastructure/generated/ssh_config control-1
 # Run a playbook against all guests through their assigned hypervisors.
 ansible-playbook -i infrastructure/generated/guest_inventory.json PLAYBOOK.yml
 ```
+
+Guest and jump-host keys are kept in
+`infrastructure/generated/known_hosts`, rather than the user's global SSH
+trust store. Each guest receives a host-key alias containing its hypervisor and
+VM name, which prevents identical private DHCP addresses on different libvirt
+networks from colliding. A successful infrastructure apply resets this local
+trust store because the managed VMs may have been recreated.
 
 These generated files are ignored by Git. If the hypervisor SSH connection
 itself requires a jump host or other advanced SSH options, set
@@ -158,6 +168,11 @@ unique.
 
 The Terraform root manages one hypervisor per state and calls the reusable
 `infrastructure/terraform/modules/qemu_vms` module for all guests on that host.
+The module imports the cloud image once as a read-only backing volume and gives
+each guest a separately sized copy-on-write system disk. This is required
+because libvirt preserves an imported cloud image's original virtual capacity
+instead of expanding it to the requested guest disk size. The Kubernetes node
+role grows the root partition and filesystem to fill that provisioned disk.
 Cloud-init creates the requested VM user, installs its SSH key and the QEMU
 guest agent, applies the network configuration, and records the Kubernetes role
 in `/etc/cs740-role`.

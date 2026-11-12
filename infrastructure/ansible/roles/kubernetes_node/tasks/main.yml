@@ -16,6 +16,40 @@
     experiment_interface.rc != 0 or
     ('inet ' + kubernetes_node_ip + '/') not in experiment_interface.stdout
 
+- name: Grow the root partition to the provisioned disk size
+  ansible.builtin.command: growpart /dev/vda 1
+  register: kubernetes_root_partition
+  changed_when: kubernetes_root_partition.stdout is search('CHANGED')
+  failed_when: >-
+    kubernetes_root_partition.rc != 0 and
+    kubernetes_root_partition.stdout is not search('NOCHANGE')
+
+- name: Grow the root filesystem to fill its partition
+  ansible.builtin.command: resize2fs /dev/vda1
+  register: kubernetes_root_filesystem
+  changed_when: >-
+    (kubernetes_root_filesystem.stdout + kubernetes_root_filesystem.stderr)
+    is not search('Nothing to do')
+
+- name: Read the provisioned disk capacity
+  ansible.builtin.command: blockdev --getsize64 /dev/vda
+  register: kubernetes_disk_capacity
+  changed_when: false
+
+- name: Read the grown root partition capacity
+  ansible.builtin.command: blockdev --getsize64 /dev/vda1
+  register: kubernetes_root_capacity
+  changed_when: false
+
+- name: Verify the disk and root partition were expanded
+  ansible.builtin.assert:
+    that:
+      - kubernetes_disk_capacity.stdout | int >= (disk_gib | int * 1024 * 1024 * 1024)
+      - kubernetes_root_capacity.stdout | int >= ((disk_gib | int - 2) * 1024 * 1024 * 1024)
+    fail_msg: >-
+      The {{ disk_gib }} GiB system disk or its root partition was not expanded
+      to the provisioned capacity.
+
 - name: Disable swap immediately
   ansible.builtin.command: swapoff -a
   when: ansible_facts.swaptotal_mb | int > 0
@@ -79,6 +113,14 @@
   register: containerd_default_config
   changed_when: false
 
+- name: Create the containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure containerd to use the systemd cgroup driver
   ansible.builtin.copy:
     dest: /etc/containerd/config.toml
@@ -112,9 +154,8 @@
     owner: root
     group: root
     mode: "0644"
-    content: >-
-      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc]
-      https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/ /
+    content: |
+      deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor_version }}/deb/ /
 
 - name: Install the pinned Kubernetes node packages
   ansible.builtin.apt:
@@ -124,7 +165,6 @@
       - "kubelet={{ kubernetes_package_version }}"
     state: present
     update_cache: true
-    cache_valid_time: 3600
     allow_downgrade: true
     allow_change_held_packages: true
 

@@ -11,6 +11,41 @@
       - helm_architecture != 'unsupported'
     fail_msg: "Unsupported Helm architecture: {{ ansible_facts.architecture }}"
 
+- name: Create the pinned Cilium CLI installation directory
+  ansible.builtin.file:
+    path: "/opt/cilium-cli-{{ cilium_cli_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download and verify the pinned Cilium CLI release
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/cilium/cilium-cli/releases/download/{{ cilium_cli_version }}/cilium-linux-{{ helm_architecture }}.tar.gz
+    dest: "/opt/cilium-cli-{{ cilium_cli_version }}/cilium.tar.gz"
+    checksum: >-
+      sha256:https://github.com/cilium/cilium-cli/releases/download/{{ cilium_cli_version }}/cilium-linux-{{ helm_architecture }}.tar.gz.sha256sum
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract the pinned Cilium CLI release
+  ansible.builtin.unarchive:
+    src: "/opt/cilium-cli-{{ cilium_cli_version }}/cilium.tar.gz"
+    dest: "/opt/cilium-cli-{{ cilium_cli_version }}"
+    remote_src: true
+    creates: "/opt/cilium-cli-{{ cilium_cli_version }}/cilium"
+
+- name: Install the Cilium CLI executable
+  ansible.builtin.copy:
+    src: "/opt/cilium-cli-{{ cilium_cli_version }}/cilium"
+    remote_src: true
+    dest: /usr/local/bin/cilium
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Create the pinned Helm installation directory
   ansible.builtin.file:
     path: "/opt/helm-{{ helm_version }}"

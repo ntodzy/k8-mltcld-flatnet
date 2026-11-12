@@ -14,7 +14,7 @@ variables {
 
   network = {
     mode   = "direct"
-    source = "enp130s0f0"
+    source = "eno1d1"
   }
 
   management_network = {
@@ -59,6 +59,21 @@ run "plans_direct_virtio_guests" {
   assert {
     condition     = module.qemu_vms.virtual_machines.controller.network_mode == "direct"
     error_message = "The selected direct mode must reach the VM module."
+  }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.disk_gib == 20
+    error_message = "The configured system disk capacity must reach the VM module."
+  }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.disk_volume == "test-controller-disk.qcow2"
+    error_message = "Each VM must receive a separately sized copy-on-write disk."
+  }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.base_volume == "test-base.qcow2"
+    error_message = "VM disks must use the imported cloud image as their backing volume."
   }
 }
 

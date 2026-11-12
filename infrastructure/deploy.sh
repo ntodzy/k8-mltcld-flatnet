@@ -300,9 +300,11 @@ if [[ "${action}" == "apply" ]]; then
   generated_dir="${SCRIPT_DIR}/generated"
   guest_inventory="${generated_dir}/guest_inventory.json"
   guest_ssh_config="${generated_dir}/ssh_config"
+  guest_known_hosts="${generated_dir}/known_hosts"
   mkdir -p "${generated_dir}"
+  : >"${guest_known_hosts}"
 
-  jq -rs --arg key "${private_key}" '
+  jq -rs --arg key "${private_key}" --arg known_hosts "${guest_known_hosts}" '
     ([.[] | {
       key: ("cs740-" + .hypervisor + "-jump"),
       value: {
@@ -310,10 +312,11 @@ if [[ "${action}" == "apply" ]]; then
         user: .hypervisor_user
       }
     }] | unique_by(.key)) as $jumps |
+    (["Host *\n  UserKnownHostsFile \"\($known_hosts)\"\n  HashKnownHosts no"]) +
     ($jumps | map(
-      "Host \(.key)\n  HostName \(.value.hostname)\n  User \(.value.user)\n  IdentityFile \"\($key)\"\n  StrictHostKeyChecking accept-new"
+      "Host \(.key)\n  HostName \(.value.hostname)\n  User \(.value.user)\n  IdentityFile \"\($key)\"\n  HostKeyAlias \(.key)\n  StrictHostKeyChecking accept-new"
     )) +
-    ([.[] | "Host \(.name)\n  HostName \(.management_ipv4)\n  User \(.vm_user)\n  IdentityFile \"\($key)\"\n  ProxyJump cs740-\(.hypervisor)-jump\n  StrictHostKeyChecking accept-new"])
+    ([.[] | "Host \(.name)\n  HostName \(.management_ipv4)\n  User \(.vm_user)\n  IdentityFile \"\($key)\"\n  ProxyJump cs740-\(.hypervisor)-jump\n  HostKeyAlias cs740-\(.hypervisor)-\(.name)\n  StrictHostKeyChecking accept-new"])
     | join("\n\n") + "\n"
   ' "${guest_records}" >"${guest_ssh_config}"
 
@@ -325,17 +328,19 @@ if [[ "${action}" == "apply" ]]; then
         ansible_host: $vm.management_ipv4,
         ansible_user: $vm.vm_user,
         ansible_ssh_private_key_file: $key,
-        ansible_ssh_common_args: ("-F " + $ssh_config + " -o ProxyJump=cs740-" + $vm.hypervisor + "-jump"),
+        ansible_ssh_common_args: ("-F " + $ssh_config + " -o ProxyJump=cs740-" + $vm.hypervisor + "-jump -o HostKeyAlias=cs740-" + $vm.hypervisor + "-" + $vm.name),
         cs740_role: $vm.role,
         experiment_ipv4: $vm.ipv4_address,
+        disk_gib: $vm.disk_gib,
         hypervisor: $vm.hypervisor
       }
     ) |
     {all: {children: {virtual_machines: {hosts: .}}}}
   ' "${guest_records}" >"${guest_inventory}"
-  chmod 0600 "${guest_inventory}" "${guest_ssh_config}"
+  chmod 0600 "${guest_inventory}" "${guest_ssh_config}" "${guest_known_hosts}"
 
   log "Guest SSH config: ${guest_ssh_config}"
+  log "Guest SSH host keys: ${guest_known_hosts}"
   log "Guest Ansible inventory: ${guest_inventory}"
 fi
 
