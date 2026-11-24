@@ -1,0 +1,22 @@
+No. My earlier comparison used the single results pasted into the chat. I’ve now analyzed the five 30-second trials in [native results](/home/todzy/projects/cs740research/results/cilium_native_5t_30s) and [VXLAN results](/home/todzy/projects/cs740research/results/cilium_vxlan_5t_30s).
+
+The aggregated results show an even larger native-routing advantage:
+
+| Test | Native mean | VXLAN mean | Difference |
+|---|---:|---:|---:|
+| Cross-node pod, single | 5.91 ± 0.37 Gb/s | 3.23 ± 0.08 Gb/s | **+83.0%** |
+| Cross-node pod, multi | 8.71 ± 0.53 Gb/s | 4.02 ± 0.30 Gb/s | **+116.5%** |
+| Same-node pod, single | 7.33 ± 0.18 Gb/s | 6.89 ± 0.08 Gb/s | +6.4% |
+| Same-node pod, multi | 11.94 ± 0.30 Gb/s | 11.57 ± 0.26 Gb/s | +3.2% |
+| Cross-node host, single | 9.10 Gb/s | 9.16 Gb/s | −0.6% |
+| Cross-node host, multi | 9.24 Gb/s | 9.18 Gb/s | +0.6% |
+
+The stable host baseline strengthens the conclusion that the cross-node improvement comes from the Cilium datapath rather than the underlying network.
+
+Latency does not show the same improvement:
+
+- Cross-node pod mean: native 757 µs, VXLAN 736 µs
+- P50: native 723 µs, VXLAN 714 µs
+- P99: native 1.39 ms, VXLAN 1.29 ms
+
+Those latency measurements vary substantially between trials, including the host baseline, so I would not claim a meaningful latency difference yet. The defensible conclusion is: **native routing more than doubles multistream cross-node pod throughput, while latency is currently inconclusive.**

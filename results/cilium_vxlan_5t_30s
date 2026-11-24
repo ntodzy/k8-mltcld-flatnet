@@ -1,0 +1,71 @@
+
+🔥 Network Performance Test Summary [cilium-test-1]:
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+📋 Scenario        | Node       | Test            | Duration        | Min             | Mean            | Max             | P50             | P90             | P99             | Transaction rate OP/s
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+📋 pod-to-pod      | same-node  | TCP_RR          | 30s             | 23µs            | 36.67µs         | 2.216ms         | 34µs            | 48µs            | 80µs            | 27112.15    
+📋 host-to-host    | same-node  | TCP_RR          | 30s             | 28µs            | 41.33µs         | 2.597ms         | 38µs            | 53µs            | 87µs            | 24072.06    
+📋 pod-to-pod      | other-node | TCP_RR          | 30s             | 294µs           | 630.92µs        | 3.117ms         | 624µs           | 744µs           | 1.127ms         | 1581.52     
+📋 host-to-host    | other-node | TCP_RR          | 30s             | 101µs           | 451.28µs        | 3.057ms         | 495µs           | 867µs           | 1.166ms         | 2210.25     
+📋 pod-to-pod      | same-node  | TCP_RR          | 30s             | 24µs            | 37.04µs         | 2.567ms         | 33µs            | 48µs            | 86µs            | 26863.53    
+📋 host-to-host    | same-node  | TCP_RR          | 30s             | 28µs            | 41.86µs         | 2.633ms         | 38µs            | 54µs            | 89µs            | 23783.85    
+📋 pod-to-pod      | other-node | TCP_RR          | 30s             | 378µs           | 777.84µs        | 4.579ms         | 746µs           | 1.042ms         | 1.347ms         | 1282.34     
+📋 host-to-host    | other-node | TCP_RR          | 30s             | 91µs            | 152.24µs        | 2.834ms         | 127µs           | 160µs           | 744µs           | 6552.95     
+📋 pod-to-pod      | same-node  | TCP_RR          | 30s             | 24µs            | 38.2µs          | 2.992ms         | 34µs            | 51µs            | 84µs            | 25997.67    
+📋 host-to-host    | same-node  | TCP_RR          | 30s             | 27µs            | 41.27µs         | 2.748ms         | 37µs            | 52µs            | 93µs            | 24125.92    
+📋 pod-to-pod      | other-node | TCP_RR          | 30s             | 291µs           | 790.67µs        | 2.925ms         | 764µs           | 991µs           | 1.359ms         | 1261.79     
+📋 host-to-host    | other-node | TCP_RR          | 30s             | 97µs            | 436.13µs        | 4.47ms          | 463µs           | 828µs           | 1.09ms          | 2286.99     
+📋 pod-to-pod      | same-node  | TCP_RR          | 30s             | 23µs            | 36.38µs         | 2.361ms         | 34µs            | 47µs            | 77µs            | 27308.60    
+📋 host-to-host    | same-node  | TCP_RR          | 30s             | 28µs            | 42.63µs         | 2.232ms         | 39µs            | 57µs            | 92µs            | 23326.79    
+📋 pod-to-pod      | other-node | TCP_RR          | 30s             | 298µs           | 687.19µs        | 5.544ms         | 666µs           | 797µs           | 1.272ms         | 1451.49     
+📋 host-to-host    | other-node | TCP_RR          | 30s             | 98µs            | 130.51µs        | 2.327ms         | 125µs           | 146µs           | 220µs           | 7647.34     
+📋 pod-to-pod      | same-node  | TCP_RR          | 30s             | 24µs            | 37.98µs         | 3.043ms         | 34µs            | 50µs            | 81µs            | 26167.40    
+📋 host-to-host    | same-node  | TCP_RR          | 30s             | 29µs            | 43.62µs         | 3.192ms         | 39µs            | 57µs            | 92µs            | 22806.74    
+📋 pod-to-pod      | other-node | TCP_RR          | 30s             | 290µs           | 794.01µs        | 3.286ms         | 769µs           | 987µs           | 1.331ms         | 1256.48     
+📋 host-to-host    | other-node | TCP_RR          | 30s             | 96µs            | 168.44µs        | 3.109ms         | 127µs           | 189µs           | 892µs           | 5922.12     
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------
+📋 Scenario        | Node       | Test               | Duration        | Throughput Mb/s 
+----------------------------------------------------------------------------------------
+📋 pod-to-pod      | same-node  | TCP_STREAM         | 30s             | 6914.31      
+📋 pod-to-pod      | same-node  | TCP_STREAM_MULTI   | 30s             | 11607.07     
+📋 host-to-host    | same-node  | TCP_STREAM         | 30s             | 14807.51     
+📋 host-to-host    | same-node  | TCP_STREAM_MULTI   | 30s             | 19338.29     
+📋 pod-to-pod      | other-node | TCP_STREAM         | 30s             | 3371.76      
+📋 pod-to-pod      | other-node | TCP_STREAM_MULTI   | 30s             | 3857.28      
+📋 host-to-host    | other-node | TCP_STREAM         | 30s             | 9088.05      
+📋 host-to-host    | other-node | TCP_STREAM_MULTI   | 30s             | 9218.81      
+📋 pod-to-pod      | same-node  | TCP_STREAM         | 30s             | 6919.17      
+📋 pod-to-pod      | same-node  | TCP_STREAM_MULTI   | 30s             | 11285.13     
+📋 host-to-host    | same-node  | TCP_STREAM         | 30s             | 14902.10     
+📋 host-to-host    | same-node  | TCP_STREAM_MULTI   | 30s             | 19677.72     
+📋 pod-to-pod      | other-node | TCP_STREAM         | 30s             | 3215.06      
+📋 pod-to-pod      | other-node | TCP_STREAM_MULTI   | 30s             | 4428.13      
+📋 host-to-host    | other-node | TCP_STREAM         | 30s             | 9087.06      
+📋 host-to-host    | other-node | TCP_STREAM_MULTI   | 30s             | 9286.15      
+📋 pod-to-pod      | same-node  | TCP_STREAM         | 30s             | 6747.06      
+📋 pod-to-pod      | same-node  | TCP_STREAM_MULTI   | 30s             | 11954.07     
+📋 host-to-host    | same-node  | TCP_STREAM         | 30s             | 14671.28     
+📋 host-to-host    | same-node  | TCP_STREAM_MULTI   | 30s             | 19773.16     
+📋 pod-to-pod      | other-node | TCP_STREAM         | 30s             | 3143.66      
+📋 pod-to-pod      | other-node | TCP_STREAM_MULTI   | 30s             | 3681.59      
+📋 host-to-host    | other-node | TCP_STREAM         | 30s             | 9210.10      
+📋 host-to-host    | other-node | TCP_STREAM_MULTI   | 30s             | 8853.67      
+📋 pod-to-pod      | same-node  | TCP_STREAM         | 30s             | 6964.67      
+📋 pod-to-pod      | same-node  | TCP_STREAM_MULTI   | 30s             | 11597.51     
+📋 host-to-host    | same-node  | TCP_STREAM         | 30s             | 14844.37     
+📋 host-to-host    | same-node  | TCP_STREAM_MULTI   | 30s             | 19820.60     
+📋 pod-to-pod      | other-node | TCP_STREAM         | 30s             | 3226.07      
+📋 pod-to-pod      | other-node | TCP_STREAM_MULTI   | 30s             | 3947.82      
+📋 host-to-host    | other-node | TCP_STREAM         | 30s             | 9239.79      
+📋 host-to-host    | other-node | TCP_STREAM_MULTI   | 30s             | 9192.86      
+📋 pod-to-pod      | same-node  | TCP_STREAM         | 30s             | 6906.54      
+📋 pod-to-pod      | same-node  | TCP_STREAM_MULTI   | 30s             | 11385.44     
+📋 host-to-host    | same-node  | TCP_STREAM         | 30s             | 14746.39     
+📋 host-to-host    | same-node  | TCP_STREAM_MULTI   | 30s             | 19606.61     
+📋 pod-to-pod      | other-node | TCP_STREAM         | 30s             | 3201.02      
+📋 pod-to-pod      | other-node | TCP_STREAM_MULTI   | 30s             | 4208.49      
+📋 host-to-host    | other-node | TCP_STREAM         | 30s             | 9164.26      
+📋 host-to-host    | other-node | TCP_STREAM_MULTI   | 30s             | 9360.37      
+----------------------------------------------------------------------------------------
+

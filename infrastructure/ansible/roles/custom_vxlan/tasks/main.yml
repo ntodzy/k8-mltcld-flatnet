@@ -1,0 +1,84 @@
+---
+- name: Inspect any previous VM VXLAN service
+  ansible.builtin.stat:
+    path: /etc/systemd/system/cs740-vxlan.service
+  register: custom_vxlan_service
+
+- name: Stop previous VM VXLAN forwarding before reconciling routes
+  ansible.builtin.systemd_service:
+    name: cs740-vxlan
+    state: stopped
+    enabled: false
+  when: custom_vxlan_service.stat.exists
+
+- name: Configure VM-managed VXLAN
+  when: cilium_network_mode == 'vm-vxlan'
+  block:
+    - name: Require a small topology and a jumbo-capable guest underlay
+      ansible.builtin.command: ip -j link show dev experiment
+      register: custom_vxlan_link
+      changed_when: false
+
+    - name: Verify native MTU fits inside VXLAN
+      ansible.builtin.assert:
+        that:
+          - (custom_vxlan_link.stdout | from_json)[0].mtu | int >= 1550
+          - groups['virtual_machines'] | length <= 254
+        fail_msg: VM VXLAN requires experiment MTU >= 1550 and at most 254 nodes.
+
+    - name: Verify the underlay path carries a full VXLAN frame without fragmentation
+      ansible.builtin.command:
+        argv: [ping, -n, -I, experiment, -M, do, -s, '1522', -c, '1', -W, '3', "{{ hostvars[item].kubernetes_node_ip }}"]
+      loop: "{{ groups['virtual_machines'] | difference([inventory_hostname]) }}"
+      changed_when: false
+
+    - name: Read allocated node PodCIDRs from the control plane
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - get
+          - nodes
+          - -o
+          - json
+      delegate_to: "{{ groups['kubernetes_controllers'][0] }}"
+      register: custom_vxlan_nodes
+      changed_when: false
+      until: >-
+        (custom_vxlan_nodes.stdout | from_json)['items'] |
+        selectattr('spec.podCIDR', 'defined') | list | length == groups['virtual_machines'] | length
+      retries: 30
+      delay: 5
+
+    - name: Write VM VXLAN forwarding script
+      ansible.builtin.template:
+        src: vm-vxlan.sh.j2
+        dest: /usr/local/sbin/cs740-vxlan
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Install persistent VM VXLAN service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cs740-vxlan.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=CS740 VM VXLAN PodCIDR forwarding
+          Wants=network-online.target
+          After=network-online.target
+          Before=kubelet.service
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/cs740-vxlan up
+          ExecStop=/usr/local/sbin/cs740-vxlan down
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Start VM VXLAN forwarding
+      ansible.builtin.systemd_service:
+        name: cs740-vxlan
+        enabled: true
+        state: started
+        daemon_reload: true

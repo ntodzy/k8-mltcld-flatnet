@@ -1,0 +1,72 @@
+---
+# Run with the example guest inventory; all tasks execute locally.
+- name: Render and validate all network profiles without contacting guests
+  hosts: virtual_machines
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../kubernetes/cluster-config.yml
+  tasks:
+    - name: Define test node groups
+      ansible.builtin.group_by:
+        key: "kubernetes_{{ 'controllers' if cs740_role == 'controller' else 'workers' }}"
+    - name: Define test node addresses
+      ansible.builtin.set_fact:
+        kubernetes_node_ip: "{{ experiment_ipv4.split('/')[0] }}"
+    - name: Create temporary output directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: cs740-profiles-
+      register: profile_test_dir
+    - name: Validate rendered artifacts
+      block:
+        - name: Render each Cilium profile
+          ansible.builtin.template:
+            src: ../ansible/roles/cilium/templates/values.yml.j2
+            dest: '{{ profile_test_dir.path }}/{{ item }}.yml'
+            mode: '0600'
+          vars:
+            cilium_network_mode: '{{ item }}'
+          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan]
+        - name: Assert routing, MTU, and rollout behavior
+          ansible.builtin.assert:
+            that:
+              - values.routingMode == ('tunnel' if item == 'vxlan' else 'native')
+              - values.autoDirectNodeRoutes == (item not in ['vxlan', 'vm-vxlan'])
+              - values.MTU == (1450 if item == 'direct-1450' else (1500 if item in ['vm-vxlan', 'host-vxlan'] else 0))
+              - values.rollOutCiliumPods
+              - values.k8sServiceHost == hostvars[groups['kubernetes_controllers'][0]].kubernetes_node_ip
+          vars:
+            values: "{{ lookup('file', profile_test_dir.path + '/' + item + '.yml') | from_yaml }}"
+          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan]
+        - name: Construct Kubernetes node fixture
+          ansible.builtin.set_fact:
+            fixture_nodes: "{{ fixture_nodes | default([]) + [{'metadata': {'name': item}, 'spec': {'podCIDR': '10.244.' + (node_index | string) + '.0/24'}}] }}"
+          loop: "{{ groups['virtual_machines'] | sort }}"
+          loop_control:
+            index_var: node_index
+        - name: Render per-VM forwarding script
+          ansible.builtin.template:
+            src: ../ansible/roles/custom_vxlan/templates/vm-vxlan.sh.j2
+            dest: '{{ profile_test_dir.path }}/vm-vxlan.sh'
+            mode: '0600'
+          vars:
+            custom_vxlan_nodes:
+              stdout: "{{ {'items': fixture_nodes} | to_json }}"
+        - name: Check generated shell syntax
+          ansible.builtin.command:
+            argv: [bash, -n, '{{ profile_test_dir.path }}/vm-vxlan.sh']
+          changed_when: false
+        - name: Verify every remote PodCIDR has a tunnel route
+          ansible.builtin.assert:
+            that:
+              - script.count('ip route replace ') == groups['virtual_machines'] | length - 1
+              - script.count('bridge fdb replace ') == groups['virtual_machines'] | length - 1
+              - "'mtu 1500 up' in script"
+          vars:
+            script: "{{ lookup('file', profile_test_dir.path + '/vm-vxlan.sh') }}"
+      always:
+        - name: Remove temporary artifacts
+          ansible.builtin.file:
+            path: '{{ profile_test_dir.path }}'
+            state: absent

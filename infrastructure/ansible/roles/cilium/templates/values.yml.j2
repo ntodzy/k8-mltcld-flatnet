@@ -9,9 +9,23 @@ autoDirectNodeRoutes: false
 # stack and install a direct route through the owning node on the shared L2.
 routingMode: native
 ipv4NativeRoutingCIDR: {{ kubernetes_pod_subnet }}
-autoDirectNodeRoutes: true
+autoDirectNodeRoutes: {{ 'false' if cilium_network_mode == 'vm-vxlan' else 'true' }}
 {% endif %}
-devices: experiment
+devices: {{ 'experiment,cs740vx' if cilium_network_mode == 'vm-vxlan' else 'experiment' }}
+{% if cilium_network_mode == 'direct-1450' %}
+MTU: 1450
+{% elif cilium_network_mode in ['vm-vxlan', 'host-vxlan'] %}
+MTU: 1500
+{% else %}
+MTU: 0
+{% endif %}
+
+# Bootstrap directly through the control-plane address. During a datapath
+# profile change, Cilium's service handling may be unavailable until the new
+# agent starts, so using the kubernetes Service ClusterIP here can deadlock the
+# rolling update.
+k8sServiceHost: {{ hostvars[groups['kubernetes_controllers'][0]].kubernetes_node_ip }}
+k8sServicePort: 6443
 
 ipam:
   mode: kubernetes

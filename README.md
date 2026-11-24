@@ -245,3 +245,125 @@ experiment LAN is unfiltered or that these flows are allowed out of band.
 The deployment is intentionally separate from `deploy.sh`: a new reservation
 can update the hypervisor endpoints in `config.json`, recreate the same VM
 topology, and then run `cluster.sh apply` without changing cluster automation.
+
+### Additional experiment modes
+
+| Mode | Forwarding | Inner MTU | Encapsulation location |
+| --- | --- | --- | --- |
+| `vm-local` benchmark | Direct VM IPs on one hypervisor | Guest experiment MTU | None |
+| `direct-1450` | Cilium native routing | 1450 | None; MTU control for the VXLAN baseline |
+| `vm-vxlan` | Cilium native routing over custom Linux VXLAN | 1500 | One VTEP per VM |
+| `host-vxlan` | Cilium native routing over a shared VXLAN LAN | 1500 | One VTEP per hypervisor |
+
+The existing `vxlan`, `native`, and `flat` selections remain available. Select
+these cluster profiles with `cluster.sh --network-mode MODE apply`; replace
+`apply` with `validate` for local syntax validation. The two custom VXLAN
+variants use VNI 740 and UDP 4789, distinct from Cilium's UDP 8472 baseline.
+
+#### Same-host VM baseline
+
+Run the benchmark against two different VMs with the same inventory
+`hypervisor`, using their experiment addresses directly:
+
+```bash
+export ANSIBLE_CONFIG="$PWD/infrastructure/ansible/ansible.cfg"
+ansible-playbook -i infrastructure/generated/guest_inventory.json \
+  infrastructure/ansible/playbooks/vm-local.yml \
+  -e source_vm=worker-2 -e destination_vm=worker-3 \
+  -e duration=30 -e output_file="$PWD/results-vm-local.json"
+```
+
+The playbook installs iperf3/ping on the two guests, checks placement and the
+client route, and saves ping, iperf3 JSON (including endpoint CPU utilization),
+and placement metadata on the deployment controller. It uses TCP 17400 and a
+bounded, one-client server. Choose an unused output filename for each repeat.
+On the supplied macvtap **bridge** configuration or a common Linux bridge,
+local unicast stays on the hypervisor. Confirm this with a capture of the test
+flow on the physical experiment NIC; inventory placement and route checks
+alone cannot prove that an externally configured bridge never sends frames
+onto the wire. Use this VM-IP benchmark separately from Pod-IP measurements.
+
+#### Reduced-MTU direct control
+
+```bash
+infrastructure/cluster.sh --network-mode direct-1450 apply
+```
+
+This uses native routing with Cilium's `MTU: 1450` to match the inner MTU of
+VXLAN over a 1500-byte underlay. It does not add a tunnel or change the VM NIC
+MTU. Recreate benchmark Pods after changing MTU so their existing interfaces
+do not retain the previous setting. Explicitly selecting `native` restores
+Cilium MTU autodetection.
+
+#### Custom VXLAN in each VM
+
+Before applying this mode, configure the complete physical/virtual underlay
+path, including guest `experiment` NICs, to MTU **at least 1550**. Keep those
+settings persistent in the host and guest network configuration. The playbook
+checks guest interface MTU and sends 1550-byte IPv4 probes with fragmentation
+disabled between every pair; it does not raise physical NIC MTUs itself.
+
+```bash
+infrastructure/cluster.sh --network-mode vm-vxlan apply
+```
+
+A persistent `cs740-vxlan` service creates `cs740vx` in every guest. Static
+FDB and neighbor entries map each peer to its experiment address; explicit
+routes carry remote Kubernetes PodCIDRs over that tunnel. Cilium runs native
+routing at MTU 1500 with automatic direct-node routes disabled. The experiment
+reserves `10.245.0.0/24`, interface `cs740vx`, and route protocol 242; ensure
+these do not overlap existing networks or routing automation. At most 254 VMs
+are supported. Reapply after changing node membership or allocated PodCIDRs.
+Selecting another cluster mode stops/disables the VM service and removes its
+interface and routes. Recreate benchmark Pods when changing profiles.
+
+#### Shared VXLAN on the hypervisors
+
+Use a separate underlay subnet (the example uses `10.75.0.0/24`) with persistent
+addresses and MTU >=1550 on each physical experiment NIC. The guest experiment
+subnet remains `10.74.0.0/24`. Copy
+[`host-vxlan.inventory.example.yml`](infrastructure/experiments/host-vxlan.inventory.example.yml)
+and replace SSH settings, underlay interfaces, and VTEP addresses, then run:
+
+```bash
+export ANSIBLE_CONFIG="$PWD/infrastructure/ansible/ansible.cfg"
+ansible-playbook -i /path/to/host-vxlan.inventory.yml \
+  infrastructure/ansible/playbooks/host-vxlan.yml
+```
+
+This checks interface and peer-path MTU, then creates persistent `cs740br` and
+`cs740hvx` devices. Physical interfaces remain outside the bridge. In the
+deployment JSON, set **each** hypervisor's `network` to
+`{"mode": "bridge", "source": "cs740br"}`, then deploy the VMs and cluster:
+
+```bash
+infrastructure/deploy.sh --config infrastructure/config.json apply
+infrastructure/cluster.sh --network-mode host-vxlan apply
+```
+
+The guest experiment NICs and Cilium use MTU 1500. Node traffic, including
+native-routed Pod traffic, crosses the shared host tunnel; encapsulation CPU
+cost is paid by the hypervisor. Unlike the VM variant, all guest experiment
+traffic between hypervisors uses the overlay. Measure guest **and hypervisor**
+CPU, and keep placement, stream counts, duration, offloads, and inner MTU the
+same when comparing the variants. Permit UDP 4789 and the MTU probes on the
+underlay. The playbooks assume an unfiltered experiment network.
+
+Changing `cluster.sh` mode does not move VM NICs off `cs740br`. To return to a
+physical direct-network experiment, restore the deployment JSON's direct
+attachment and reconcile the VMs first. To remove shared VXLAN after detaching
+all guests, disable `cs740-host-vxlan` on each host and delete `cs740hvx` and
+`cs740br`; the shared bridge is deliberately not deleted during cluster-mode
+switches. Reapply its host playbook after changing VTEP addresses or peers;
+recreate `cs740hvx` first if its local address or underlay device changes.
+
+Cilium's [Helm reference](https://docs.cilium.io/en/stable/helm-reference/)
+documents the MTU override and native-routing controls used by these profiles.
+
+Run the local profile regression checks without contacting any CloudLab host:
+
+```bash
+ANSIBLE_CONFIG="$PWD/infrastructure/ansible/ansible.cfg" \
+ansible-playbook -i infrastructure/kubernetes/inventory.example.json \
+  infrastructure/tests/network-profiles.yml
+```

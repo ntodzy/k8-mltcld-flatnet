@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Protocol 242 and cs740vx are reserved for this experiment.
+if [[ "${1:-}" == down ]]; then
+  ip -4 route flush proto 242
+  if ip link show dev cs740vx >/dev/null 2>&1; then ip link delete cs740vx; fi
+  exit 0
+fi
+[[ "${1:-}" == up ]] || exit 2
+{% set nodes = groups['virtual_machines'] | sort %}
+{% set local_index = nodes.index(inventory_hostname) + 1 %}
+modprobe vxlan
+ip -4 route flush proto 242
+if ip link show dev cs740vx >/dev/null 2>&1; then ip link delete cs740vx; fi
+ip link add cs740vx type vxlan id 740 local {{ kubernetes_node_ip | quote }} dev experiment dstport 4789 nolearning
+ip link set dev cs740vx address 02:74:00:00:00:{{ '%02x' | format(local_index) }} mtu 1500 up
+ip address add 10.245.0.{{ local_index }}/24 dev cs740vx
+sysctl -qw net.ipv4.conf.cs740vx.rp_filter=2
+{% for peer in nodes if peer != inventory_hostname %}
+{% set peer_index = nodes.index(peer) + 1 %}
+{% set peer_node = (custom_vxlan_nodes.stdout | from_json)['items'] | selectattr('metadata.name', 'equalto', peer) | first %}
+bridge fdb replace 02:74:00:00:00:{{ '%02x' | format(peer_index) }} dev cs740vx dst {{ hostvars[peer].kubernetes_node_ip | quote }} self permanent
+ip neigh replace 10.245.0.{{ peer_index }} lladdr 02:74:00:00:00:{{ '%02x' | format(peer_index) }} nud permanent dev cs740vx
+ip route replace {{ peer_node.spec.podCIDR | quote }} via 10.245.0.{{ peer_index }} dev cs740vx proto 242
+{% endfor %}

@@ -1,0 +1,15 @@
+# Copy and replace SSH endpoints and experiment-LAN addresses.
+all:
+  children:
+    hypervisors:
+      hosts:
+        node1:
+          ansible_host: node1.example.cloudlab.us
+          ansible_user: your-cloudlab-user
+          vxlan_underlay_interface: eno1d1
+          vxlan_underlay_ipv4: 10.75.0.1
+        node2:
+          ansible_host: node2.example.cloudlab.us
+          ansible_user: your-cloudlab-user
+          vxlan_underlay_interface: eno1d1
+          vxlan_underlay_ipv4: 10.75.0.2

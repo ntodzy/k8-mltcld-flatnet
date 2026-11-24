@@ -149,11 +149,30 @@
   register: cilium_active_direct_routes
   changed_when: false
 
+- name: Read the configured Cilium MTU for explicit-MTU experiments
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig=/etc/kubernetes/admin.conf
+      - --namespace=kube-system
+      - get
+      - configmap/cilium-config
+      - --output=jsonpath={.data.mtu}
+  register: cilium_active_mtu
+  changed_when: false
+  when: cilium_network_mode in ['direct-1450', 'vm-vxlan', 'host-vxlan']
+
+- name: Verify the explicit Cilium MTU
+  ansible.builtin.assert:
+    that:
+      - cilium_active_mtu.stdout | int == (1450 if cilium_network_mode == 'direct-1450' else 1500)
+  when: cilium_network_mode in ['direct-1450', 'vm-vxlan', 'host-vxlan']
+
 - name: Verify the requested Cilium network profile is active
   ansible.builtin.assert:
     that:
       - cilium_active_routing_mode.stdout == ('tunnel' if cilium_network_mode == 'vxlan' else 'native')
-      - cilium_active_direct_routes.stdout == ('false' if cilium_network_mode == 'vxlan' else 'true')
+      - cilium_active_direct_routes.stdout == ('false' if cilium_network_mode in ['vxlan', 'vm-vxlan'] else 'true')
     fail_msg: >-
       Cilium did not activate the requested {{ cilium_network_mode }} network
       profile.

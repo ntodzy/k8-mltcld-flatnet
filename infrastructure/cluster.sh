@@ -20,7 +20,7 @@ any VM or hypervisor.
 
 Options:
   -i, --inventory FILE  Guest inventory (default: generated/guest_inventory.json)
-  --network-mode MODE   Cilium datapath: vxlan (default) or native (flat routing)
+  --network-mode MODE   Cilium datapath: vxlan (default), native, direct-1450, vm-vxlan, host-vxlan
   -h, --help            Show this help
 EOF
 }
@@ -39,7 +39,7 @@ while (($# > 0)); do
       shift 2
       ;;
     --network-mode)
-      (($# >= 2)) || die "$1 requires vxlan or native"
+      (($# >= 2)) || die "$1 requires a mode"
       network_mode="$2"
       shift 2
       ;;
@@ -60,9 +60,10 @@ done
 if [[ "${network_mode}" == "flat" ]]; then
   network_mode="native"
 fi
-if [[ -n "${network_mode}" && "${network_mode}" != "vxlan" && "${network_mode}" != "native" ]]; then
-  die "network mode must be vxlan or native (flat is accepted as an alias)"
-fi
+case "${network_mode}" in
+  ""|vxlan|native|direct-1450|vm-vxlan|host-vxlan) ;;
+  *) die "network mode must be vxlan, native, direct-1450, vm-vxlan, or host-vxlan" ;;
+esac
 
 command -v ansible-playbook >/dev/null 2>&1 || die "required command not found: ansible-playbook"
 command -v jq >/dev/null 2>&1 || die "required command not found: jq"

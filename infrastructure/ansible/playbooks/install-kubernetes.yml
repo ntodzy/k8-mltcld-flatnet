@@ -40,14 +40,14 @@
         that:
           - groups.get('kubernetes_controllers', []) | length == 1
           - groups.get('kubernetes_workers', []) | length >= 1
-          - cilium_network_mode in ['vxlan', 'native']
+          - cilium_network_mode in ['vxlan', 'native', 'direct-1450', 'vm-vxlan', 'host-vxlan']
           - >-
             groups['virtual_machines'] | map('extract', hostvars, 'kubernetes_node_ip') |
             list | unique | length == groups['virtual_machines'] | length
         fail_msg: >-
           This architecture requires exactly one controller, one or more
           workers, a unique experiment IPv4 address for every VM, and a Cilium
-          network mode of vxlan or native.
+          supported network mode.
       run_once: true
 
 - name: Prepare every Kubernetes node
@@ -76,6 +76,15 @@
     - ../../kubernetes/cluster-config.yml
   roles:
     - role: kubernetes_worker
+
+- name: Configure or remove VM-managed VXLAN forwarding
+  hosts: virtual_machines
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../../kubernetes/cluster-config.yml
+  roles:
+    - role: custom_vxlan
 
 - name: Install the selected Cilium pod network
   hosts: kubernetes_controllers

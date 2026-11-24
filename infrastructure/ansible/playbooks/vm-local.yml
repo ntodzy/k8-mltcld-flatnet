@@ -1,0 +1,108 @@
+---
+- name: Validate the same-hypervisor VM baseline
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require two different guests on the same physical host
+      ansible.builtin.assert:
+        that:
+          - source_vm is defined
+          - destination_vm is defined
+          - source_vm in groups['virtual_machines']
+          - destination_vm in groups['virtual_machines']
+          - source_vm != destination_vm
+          - hostvars[source_vm].hypervisor == hostvars[destination_vm].hypervisor
+          - duration | default(30) | int > 0
+          - duration | default(30) | int <= 3600
+        fail_msg: Select distinct source_vm and destination_vm on the same hypervisor.
+    - name: Select just the two measurement guests
+      ansible.builtin.add_host:
+        name: '{{ item }}'
+        groups: vm_local_endpoints
+      loop: ['{{ source_vm }}', '{{ destination_vm }}']
+
+- name: Install measurement tools on the selected pair
+  hosts: vm_local_endpoints
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install iperf3 and ping
+      ansible.builtin.apt:
+        name: [iperf3, iputils-ping]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+- name: Measure the direct same-host VM path
+  hosts: localhost
+  gather_facts: false
+  vars:
+    server_ip: "{{ hostvars[destination_vm].experiment_ipv4.split('/')[0] }}"
+    client_ip: "{{ hostvars[source_vm].experiment_ipv4.split('/')[0] }}"
+    measurement_duration: '{{ duration | default(30) | int }}'
+  tasks:
+    - name: Start a one-client server with a bounded lifetime
+      ansible.builtin.command:
+        argv: [timeout, '{{ measurement_duration | int + 30 }}', iperf3, --server, --one-off, --bind, '{{ server_ip }}', --port, '17400']
+      delegate_to: '{{ destination_vm }}'
+      async: '{{ measurement_duration | int + 40 }}'
+      poll: 0
+      register: vm_local_server
+    - name: Measure latency and throughput
+      block:
+        - name: Wait for the server to listen
+          ansible.builtin.command:
+            argv: [ss, -H, -ltn, 'sport = :17400']
+          delegate_to: '{{ destination_vm }}'
+          register: vm_local_listener
+          until: vm_local_listener.stdout | length > 0
+          retries: 15
+          delay: 1
+          changed_when: false
+        - name: Measure direct VM latency
+          ansible.builtin.command:
+            argv: [ping, -n, -I, experiment, -c, '20', '{{ server_ip }}']
+          delegate_to: '{{ source_vm }}'
+          register: vm_local_ping
+          changed_when: false
+        - name: Measure throughput and endpoint CPU utilization
+          ansible.builtin.command:
+            argv: [iperf3, --client, '{{ server_ip }}', --bind, '{{ client_ip }}', --port, '17400', --time, '{{ measurement_duration }}', --json, --get-server-output]
+          delegate_to: '{{ source_vm }}'
+          register: vm_local_iperf
+          changed_when: false
+        - name: Inspect the actual client route
+          ansible.builtin.command:
+            argv: [ip, -j, route, get, '{{ server_ip }}', from, '{{ client_ip }}']
+          delegate_to: '{{ source_vm }}'
+          register: vm_local_route
+          changed_when: false
+        - name: Require the direct experiment interface
+          ansible.builtin.assert:
+            that:
+              - (vm_local_route.stdout | from_json)[0].dev == 'experiment'
+        - name: Save measurement and placement metadata
+          ansible.builtin.copy:
+            dest: "{{ output_file | default('/tmp/cs740-vm-local.json') }}"
+            mode: '0644'
+            content: >-
+              {{ {'mode': 'vm-local', 'source': source_vm, 'destination': destination_vm,
+                  'hypervisor': hostvars[source_vm].hypervisor,
+                  'route': vm_local_route.stdout | from_json,
+                  'ping': vm_local_ping.stdout,
+                  'iperf3': vm_local_iperf.stdout | from_json} | to_nice_json }}
+      always:
+        - name: Wait for the bounded server to exit
+          ansible.builtin.async_status:
+            jid: '{{ vm_local_server.ansible_job_id }}'
+          delegate_to: '{{ destination_vm }}'
+          register: vm_local_server_result
+          until: vm_local_server_result.finished
+          retries: '{{ ((measurement_duration | int + 40) / 2) | int }}'
+          delay: 2
+          failed_when: false
+        - name: Remove the asynchronous job record
+          ansible.builtin.async_status:
+            jid: '{{ vm_local_server.ansible_job_id }}'
+            mode: cleanup
+          delegate_to: '{{ destination_vm }}'
