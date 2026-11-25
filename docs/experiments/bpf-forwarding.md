@@ -133,6 +133,9 @@ VXLAN and vhost stages, including available probes with zero hits. It also accep
 the host BPF pair and original custom MTU-1450 modes. It acquires the collection
 lock and is not included in the untraced collector. Tracing adds substantial
 overhead: its timings overlap and must not be pooled with primary measurements.
+The tracer attaches before benchmark Pod creation, so its initial hook snapshot
+can predate the per-run host redirect. Use that run's `host-bpf/ready.json` and
+session/counter records for the actual host filter identities during traffic.
 
 Idle policy matters substantially for RR. The experiments do not silently add
 CPU latency QoS requests. Hold power policy, queues, masks, workload and endpoint
@@ -186,3 +189,39 @@ Individual mode setup/run commands are in the four linked experiment guides:
 [host redirect](host-vxlan-bpf-1450.md),
 [guest prerequisite control](vm-vxlan-bpf-legacy-1450.md), and
 [guest BPF host routing](vm-vxlan-bpf-1450.md).
+
+## Live validation, November 25
+
+All four optional modes completed short Pod-only TCP_RR correctness checks on
+worker-1/worker-2. These are smoke tests, not estimates of performance improvement.
+
+| Mode | Validation evidence |
+| --- | --- |
+| Host pass-through | [Passed CLI run and per-direction counters](../../results/bpf-integration-smoke-20261125T171045.529636Z/host-vxlan-bpf-pass-1450/metadata.json); 4,885–4,889 matched/passed packets per attachment, zero redirects |
+| Host redirect | [Passed CLI run and per-direction counters](../../results/bpf-integration-smoke-20261125T171045.529636Z/host-vxlan-bpf-1450/metadata.json); 4,942–4,946 matched/redirected packets per attachment |
+| Guest legacy prerequisite control | [Passed diagnostic run](../../results/bpf-forwarding-validation-20261125T172708.253081Z/01-vm-vxlan-bpf-legacy-1450-attempt-2/measurement/metadata.json); Native/Legacy status on both agents and tunnel receipts at both ends |
+| Guest BPF host routing | [Passed diagnostic run](../../results/bpf-forwarding-validation-20261125T172708.253081Z/02-vm-vxlan-bpf-1450-attempt-1/measurement/metadata.json); Native/BPF status on both agents and tunnel receipts at both ends |
+
+The [collector manifest](../../results/bpf-forwarding-validation-20261125T172708.253081Z/collection.json)
+also records a passed final host-baseline rebuild/measurement. Failed status-format
+and TX-counter validation attempts are retained separately and excluded from its
+successful attempt selection. The control measurement was resumed using its
+current successful setup rather than rebuilt after the counter-check correction.
+
+A separate [integrated host trace](../../results/integrated-host-bpf-trace-20261125T175202.363427Z/trace/trace-metadata.json)
+validated the new tracing wrapper, diagnostics, Pod identity checks and filter
+cleanup. During its active tracing window, the two hypervisors recorded 10,274
+and 10,272 `vxlan_xmit` calls and zero selected Pod-TCP `br_forward` calls. This
+confirms execution of Linux VXLAN with the bridge shortcut for the observed
+traffic; it does not establish an uninstrumented latency gain. Raw observations
+are exported as [CSV](../../results/integrated-host-bpf-trace-20261125T175202.363427Z/trace/kernel-observations.csv)
+and JSON alongside the generated probe programs. The additional transmit-endpoint
+guard was checked against these real observations and covered by a regression test.
+
+The repository suite passes **108 unit tests**. The completed paper dataset is
+unchanged; none of these short or instrumented samples are pooled into it.
+The [final read-only audit](../../results/integrated-host-bpf-trace-20261125T175202.363427Z/final-audit.json)
+passed: original host-vxlan-1450 and baseline Cilium routing/masquerading restored,
+all nodes Ready, kube-proxy running, guest queues one, original worker CPU masks,
+MTUs restored, base config hash unchanged, and no remaining prototype filters,
+benchmark namespaces, tracing processes or CPU latency QoS requests.

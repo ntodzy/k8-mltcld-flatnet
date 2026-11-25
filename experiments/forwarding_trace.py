@@ -10,6 +10,15 @@ import sys
 from common import BPF_MODES, GENERATED, ROOT, save_json
 
 
+def validate_tunnel_execution(rows, mode, machines):
+    expected={label for label,(_,domain,_) in machines.items()
+              if (domain is not None)==mode.startswith('host-')}
+    observed={r['target'] for r in rows if r['family']=='function'
+              and r['stage']=='vxlan_xmit' and r['count']>0}
+    if not expected or not expected.issubset(observed):
+        raise ValueError('VXLAN transmit was not observed at both expected tunnel endpoints: '+str(sorted(expected-observed)))
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=tuple(BPF_MODES)+('host-vxlan-1450','vm-vxlan-1450'))
@@ -38,12 +47,13 @@ def main():
                   'purpose':'Executed stages and counts; exclude from untraced latency estimates'}
         save_json(output/'trace-metadata.json',metadata)
         try:
-            from latency_study import measured
+            from latency_study import measured,targets
             from analyze_latency import trace_rows,write_csv
             measured(command,output,args.mode,True)
             rows=trace_rows(output,{'mode':args.mode,'condition':'instrumented'})
             save_json(output/'kernel-observations.json',rows)
             write_csv(output/'kernel-observations.csv',rows)
+            validate_tunnel_execution(rows,args.mode,targets())
             # Keep instrumentation visible even when a measurement is aggregated.
             for path in (output/'measurement').rglob('metadata.json'):
                 item=json.loads(path.read_text());item['instrumented']=True

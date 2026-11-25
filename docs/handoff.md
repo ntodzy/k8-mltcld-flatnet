@@ -1,5 +1,62 @@
 # Work handoff
 
+## Completed optional forwarding experiment integration (November 25)
+
+User requested separate integrated host/guest bypass experiments. COMPLETE.
+Four optional modes: host-vxlan-bpf-pass-1450 / host-vxlan-bpf-1450 use our
+exact-Pod-IP TCP L2 TC pass/redirect on managed TAP/VXLAN ports; guest
+vm-vxlan-bpf-legacy-1450 / vm-vxlan-bpf-1450 use supported Cilium host routing
+with shared kube-proxy replacement/BPF masquerade prerequisites. Only their
+hostLegacyRouting differs. Never attach the raw isolated L3 lab program before
+Cilium policy. Original eight defaults remain. Setup/run/collect support all
+four labels; collector --test-type rr supports latency-only collection. Individual
+guides and the full one-command comparison are in docs/experiments/bpf-forwarding.md.
+forwarding_trace.py provides separate instrumented RR validation on worker-1/2.
+
+ALL LIVE WORK FINISHED. Do not restart or extend the validation collection.
+- Host direct pass/redirect smokes passed with all four attachment counters and
+  verified cleanup: results/bpf-integration-smoke-20261125T171045.529636Z/.
+- Actual collector passed guest Legacy, guest BPF, then original host baseline:
+  results/bpf-forwarding-validation-20261125T172708.253081Z/.
+  Guest legacy selected successful attempt2; BPF successful attempt1. Both
+  endpoint agents' structured JSON proves Native/Legacy vs Native/BPF. Custom
+  routes validated and both tunnel receivers advanced (~4891/4892 vs7330/7340).
+- Combined host BPF / diagnostics / trace wrapper passed:
+  results/integrated-host-bpf-trace-20261125T175202.363427Z/.
+  Both hypervisors executed VXLAN transmit (~10,274/10,272 calls) and receive;
+  selected Pod-TCP br_forward count0 at both hosts. Separate15s active tracing
+  inside30sRR; do not pool it with untraced performance or add inclusive timings.
+  The added expected-endpoint execution guard was checked on these actual rows.
+- All108 unit tests passed; Ansible syntax validation and git diff checks passed.
+  Tests loaded existing Nix Jinja2/MarkupSafe via test sys.path; no new packages.
+- Final-audit.json in the integrated trace directory passed: host-vxlan-1450,
+  baseline Cilium Native/Legacy + iptables masquerading, kube-proxy Ready4,
+  nodes Ready4, guest queues1, masks0..15, physical1500/inner1450, configSHA
+  unchanged, no prototype filters/qdiscs, benchmark namespaces, active tracing/
+  netperf processes or CPU QoS requests. Original active mode label restored.
+
+All measurements are SHORT FUNCTIONAL SMOKES or explicitly instrumented. They
+are not new scientific effect estimates; original paper datasets/report numbers
+remain unchanged. No full comparative performance collection was launched.
+
+Retained failures: first guest workflow guest-bpf-integration-smoke-20261125T171252.093838Z
+failed before traffic on old text-status matching, then restored baseline.
+Fixed to pinned Cilium1.20.4 JSON routing fields and save-before-assert. Actual
+collector first legacy attempt completed TCP but failed an overly strict TX
+packet-stat check. Worker2 TXpackets stayed0 despite both receivers advancing;
+cause NOT isolated. Raw counters retained. Guard now requires RX at BOTH ends,
+not TXstat>0; resumed --use-current-setup without reset. Device activity is not
+exact per-flow capture; optional traces provide executed-stage observations.
+An earlier queued host diagnostic script aborted before action because it
+checked that first failed manifest. All processes/coordinators are now finished.
+
+Local checkpoints: snapshot0c9ea0e, feature103cb5c, JSONfixcd448bd,
+RR/trace3a5a923, receive-evidence00d669e; final validation snapshot follows in Git.
+Nothing pushed. No new CPU, queue or affinity tuning bundled into these modes.
+Host classic TC filters require explicit scoped-agent cleanup; after an
+interruption use python3 experiments/host_bypass.py --restore. Recovery refuses
+live owners or changed program IDs; never flush unrelated filters/Cilium links.
+
 ## Completed optional BPF prototype (November 25)
 
 User requested the CPU idle/optimization breakdown in its own file and a

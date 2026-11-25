@@ -11,11 +11,21 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import common
 import host_bypass
+import forwarding_trace
 import run as runner
 import setup
 
 
 class ForwardingExperimentTests(unittest.TestCase):
+    def test_trace_requires_execution_at_both_actual_tunnel_endpoints(self):
+        targets={'worker-1':('w1',None,'experiment'),'worker-2':('w2',None,'experiment'),
+                 'hypervisor-a':('a','worker-1','enoX'),'hypervisor-b':('b','worker-2','enoX')}
+        rows=[dict(target=name,family='function',stage='vxlan_xmit',count=10)
+              for name in ('hypervisor-a','hypervisor-b')]
+        forwarding_trace.validate_tunnel_execution(rows,'host-vxlan-bpf-1450',targets)
+        with self.assertRaises(ValueError):forwarding_trace.validate_tunnel_execution(rows[:1],'host-vxlan-bpf-1450',targets)
+        with self.assertRaises(ValueError):forwarding_trace.validate_tunnel_execution(rows,'vm-vxlan-bpf-1450',targets)
+
     def test_optional_modes_keep_original_default_suite(self):
         self.assertEqual(len(common.MODES),8)
         self.assertFalse(set(common.BPF_MODES)&set(common.MODES))
