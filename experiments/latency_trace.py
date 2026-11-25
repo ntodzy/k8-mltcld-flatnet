@@ -49,7 +49,8 @@ def build_program(spec, functions, tracked, marker_pid):
         if name == 'vxlan_xmit':
             condition = f'((struct net_device *)arg1)->name=={json.dumps(tunnel)}'
         elif name.startswith('vxlan_build_skb') or name == 'udp_tunnel_xmit_skb':
-            condition = f'@depth[{functions.index("vxlan_xmit")},{key}]>0' if 'vxlan_xmit' in functions else '0'
+            parent = functions.index('vxlan_xmit') if 'vxlan_xmit' in functions else None
+            condition = f'@begin[{parent},{key},@depth[{parent},{key}]]>0' if parent is not None else '0'
         elif name == '__iptunnel_pull_header':
             condition = f'@depth[{functions.index("vxlan_rcv")},{key}]>0' if 'vxlan_rcv' in functions else '0'
         elif name in ('handle_tx', 'tun_get_user', 'tap_get_user'):
@@ -83,7 +84,8 @@ def build_program(spec, functions, tracked, marker_pid):
                  f'if ($depth>1) {{ @depth[{index},{key}]=$depth-1; }} else {{ delete(@depth[{index},{key}]); }} }}']
     if 'vxlan_rcv' in functions:
         for name, argument in spec.get('handoff_functions', {}).items():
-            text.append(f'kprobe:{name} /@rx_packet[(uint64)arg{argument}]/ {{ '
+            text.append(f'kprobe:{name} /@rx_packet[(uint64)arg{argument}] '
+                        f'&& ((struct sk_buff *)arg{argument})->dev->name=={json.dumps(tunnel)}/ {{ '
                         f'$packet=(uint64)arg{argument}; $elapsed=nsecs-@rx_packet[$packet]; '
                         f'@receive_handoff_ns["{name}"]=stats($elapsed); '
                         f'if (@rx_return[$packet]) {{ $gap=nsecs-@rx_return[$packet]; '
@@ -152,6 +154,19 @@ def agent(spec):
     spec['handoff_functions'] = {name: arg for name, arg in
         [('napi_gro_receive', 1), ('__netif_receive_skb_one_core', 0)] if name in symbols}
     tracked = tracked_tasks(spec.get('domain'))
+    timing = {}
+    for name, path in {
+        'clocksource': '/sys/devices/system/clocksource/clocksource0/current_clocksource',
+        'cpuidle_driver': '/sys/devices/system/cpu/cpuidle/current_driver',
+        'cpuidle_governor': '/sys/devices/system/cpu/cpuidle/current_governor_ro',
+        'cpu0_governor': '/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor',
+        'halt_poll_ns': '/sys/module/kvm/parameters/halt_poll_ns',
+    }.items():
+        value = Path(path)
+        timing[name] = value.read_text().strip() if value.exists() else None
+    timing['cpu0_idle_states'] = [{key: (state / key).read_text().strip()
+                                  for key in ('name', 'latency', 'disable') if (state / key).exists()}
+                                 for state in Path('/sys/devices/system/cpu/cpu0/cpuidle').glob('state*')]
     program = build_program(spec, functions, tracked, os.getpid())
     records, ready = [], threading.Event()
     with tempfile.TemporaryFile(mode='w+') as errors:
@@ -176,7 +191,7 @@ def agent(spec):
                     errors.seek(0)
                     raise RuntimeError('bpftrace did not attach: ' + errors.read()[-6000:])
             emit('ready', functions=functions, tracked=tracked, specification=spec,
-                 kernel=os.uname().release, program=program)
+                 kernel=os.uname().release, program=program, timing_configuration=timing)
             deadline = time.monotonic() + 600
             while process.poll() is None and time.monotonic() < deadline:
                 readable, _, _ = select.select([sys.stdin], [], [], .2)

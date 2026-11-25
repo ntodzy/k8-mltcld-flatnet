@@ -2,14 +2,37 @@ import json
 from pathlib import Path
 import sys
 import unittest
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import latency_study
 import latency_trace
 import path_control
+import analyze_latency
 
 
 class LatencyIsolationTests(unittest.TestCase):
+    def test_pairs_do_not_mix_instrumented_observations(self):
+        rows = [dict(mode='vm-vxlan-1450', pair=1, condition='bypass', trace=False, mean_us=500, p99_us=900),
+                dict(mode='vm-vxlan-1450', pair=1, condition='tunnel', trace=False, mean_us=700, p99_us=1000),
+                dict(mode='vm-vxlan-1450', pair=1, condition='tunnel', trace=True, mean_us=2000, p99_us=3000)]
+        self.assertEqual(analyze_latency.paired_differences(rows),
+                         [dict(mode='vm-vxlan-1450', pair=1, extra_mean_us=200, extra_sample_p99_us=100)])
+
+    def test_bpftrace_stats_and_histogram_bounds_keep_units_and_counts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            path = work / 'traces/worker-1/trace.jsonl'; path.parent.mkdir(parents=True)
+            records = [dict(kind='ready', functions=['vxlan_xmit'], specification={'devices': ['experiment']}, kernel='6.8'),
+                       dict(kind='result', exit_code=0, records=[
+                           {'type': 'stats', 'data': {'@function_ns': {'0': {'count': 3, 'average': 1200, 'total': 3600}}}},
+                           {'type': 'hist', 'data': {'@function_hist_ns': {'0': [{'min': 1024, 'max': 2047, 'count': 3}]}}}])]
+            path.write_text('\n'.join(json.dumps(record) for record in records))
+            result = analyze_latency.trace_rows(work, {'mode': 'vm-vxlan-1450', 'condition': 'tunnel'})[0]
+            self.assertEqual(result['mean_us'], 1.2)
+            self.assertEqual(result['p99_bin_upper_us'], 2.047)
+            self.assertEqual(result['count'], 3)
+
     def test_balanced_paired_conditions_and_separate_traces(self):
         plan = latency_study.plan()
         for mode in ('host-vxlan-1450', 'vm-vxlan-1450'):

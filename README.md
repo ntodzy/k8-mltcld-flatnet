@@ -63,6 +63,7 @@ This resets the cluster between modes and saves all results together.
 - [Collect CPU, queue, offload, and TCP diagnostics](docs/experiments/diagnostics.md)
 - [Aggregate attempts into tables and graphs](docs/experiments/aggregation.md)
 - [Host VXLAN bottleneck study and complete rerun](docs/experiments/bottleneck-study.md)
+- [Paired tunnel latency isolation and kernel timing](docs/experiments/latency-isolation.md)
 - [Hypervisor setup and NIC tuning](docs/hypervisors.md)
 - [Infrastructure deployment and networking](docs/infrastructure.md)
 - [Research abstract and schedule](docs/project-plan.md)
