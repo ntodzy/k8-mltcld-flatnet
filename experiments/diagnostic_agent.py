@@ -113,6 +113,10 @@ def snapshot():
         'qdiscs': command(['tc', '-s', '-j', 'qdisc', 'show']),
         'network_sysctls': command(['sysctl', 'net.core.netdev_budget', 'net.core.netdev_budget_usecs',
                                     'net.core.netdev_max_backlog', 'net.core.rmem_max', 'net.core.wmem_max']),
+        'cpu_topology': command(['lscpu', '-J']),
+        'nic_numa_nodes': {device.name: read(device / 'device/numa_node') for device in Path('/sys/class/net').iterdir()
+                           if (device / 'device/numa_node').exists()},
+        'memory': read('/proc/meminfo'),
         'interrupts': read('/proc/interrupts'),
         'affinity': {str(p): read(p) for p in Path('/proc/irq').glob('*/smp_affinity_list')},
         'rps': {str(p): read(p) for p in Path('/sys/class/net').glob('*/queues/rx-*/rps_cpus')},
@@ -130,6 +134,8 @@ def sample():
         'tcp': command(['ss', '-t', '-i', '-n', '-p']), 'netperf': netperf,
         'pods': pods, 'tasks': tasks, 'clock_ticks': os.sysconf('SC_CLK_TCK'),
         'scheduler_stats_enabled': read('/proc/sys/kernel/sched_schedstats'),
+        'pressure': {kind: read('/proc/pressure/' + kind) for kind in ('cpu', 'memory', 'io')},
+        'vmstat': read('/proc/vmstat'),
     }
 
 

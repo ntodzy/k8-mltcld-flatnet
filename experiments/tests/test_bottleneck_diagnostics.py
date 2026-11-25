@@ -8,12 +8,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import diagnostic_agent
 import diagnostics
 import setup
+import study
+import analyze_study
 from common import ROOT, mtu_profile
 from queue_agent import driver_xml
 from test_diagnostics import record
 
 
 class BottleneckTests(unittest.TestCase):
+    def test_efficiency_uses_physical_host_cpu_without_adding_guest_cpu_again(self):
+        phase = {'test_type': 'multi', 'directory': 'phase'}
+        targets = {
+            'hypervisor-node1': {'logical_cpus': 4, 'per_core': {'cpu': {'busy_percent': 50}},
+                                 'threads': [{'comm': 'vhost-1', 'cpu_percent_one_core': 80}]},
+            'hypervisor-node2': {'logical_cpus': 4, 'per_core': {'cpu': {'busy_percent': 25}}},
+            'worker-1': {'per_core': {'cpu': {'busy_percent': 90}}, 'pod_tcp': {'uid': {
+                'host_network': False, 'snmp_delta': {'Tcp:RetransSegs': 10, 'Tcp:OutSegs': 1000},
+                'data_rtt_ms': {'mean': 10}}}}}
+        measurement = {'phases': [(phase, targets, Path('/unused'))],
+                       'metrics': {('TCP_STREAM_MULTI', 'throughput'): [8000]}}
+        result, _ = analyze_study.diagnose(measurement)
+        self.assertEqual(result['estimated_host_cpu_seconds_per_GB'], [3])
+        self.assertEqual(result['worker-1/retrans_per_1000_outsegs'], [10])
+        self.assertEqual(result['hypervisor-node1/busiest_vhost_cpu'], [80])
+
+    def test_overnight_plan_reruns_all_modes_without_contention_or_tuning(self):
+        from common import MODES
+        plan = study.plan()
+        baselines = {step['mode'] for step in plan if step['kind'] == 'measurement' and step['name'].endswith('baseline')}
+        self.assertEqual(baselines, set(MODES) | {'bridge-1450'})
+        self.assertEqual([step['queues'] for step in plan if step['kind'] == 'queues' and 'queues' in step], [2])
+        self.assertEqual(sum(step.get('restore', False) for step in plan), 1)
+        self.assertFalse(any('contention' in step['name'] or 'hubble' in step['name'] for step in plan))
+
     def test_data_socket_metrics_exclude_netperf_control_connections(self):
         raw = ('State Recv-Q Send-Q Local Peer Process\n'
                'ESTAB 0 0 10.0.0.1:40000 10.0.0.2:12865 users:netperf\n\t cubic cwnd:10 rtt:1/0.1\n'

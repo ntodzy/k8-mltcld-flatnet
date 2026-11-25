@@ -120,6 +120,10 @@ def summary(records, active_start=None, active_end=None):
         first, last = active[0], active[-1]
         result['observed_active_seconds'] = last['received_epoch'] - first['received_epoch']
         result['per_core'] = cpu_delta(cpu_rows(first['stat']), cpu_rows(last['stat']))
+        result['logical_cpus'] = len([name for name in result['per_core'] if name != 'cpu'])
+        if first.get('clock_ticks'):
+            a, b = cpu_rows(first['stat'])['cpu'], cpu_rows(last['stat'])['cpu']
+            result['busy_core_seconds'] = sum(b[index] - a[index] for index in (0, 1, 2, 5, 6)) / first['clock_ticks']
         for field in ('snmp', 'netstat'):
             result[field + '_delta'] = counters_delta(paired_counters(first[field]), paired_counters(last[field]))
         result['softnet_delta'] = counters_delta(softnet_totals(first['softnet']), softnet_totals(last['softnet']))
@@ -269,8 +273,7 @@ def run_diagnostics(args, hosts, ssh_config):
     output = (args.output or ROOT / 'results' / f'{args.mode}-diagnostics-{stamp}').resolve()
     targets = {name: name for name in (args.client, args.server)}
     controller = next(name for name, host in hosts.items() if host.get('cs740_role') == 'controller')
-    for name in (args.client, args.server):
-        host = hosts[name]['hypervisor']
+    for host in sorted({entry['hypervisor'] for entry in hosts.values()}):
         targets['hypervisor-' + host] = 'cs740-' + host + '-jump'
     if args.dry_run:
         print(f'Diagnostics: {len(plan)} isolated invocations; {args.duration}s traffic each, plus setup/cleanup each')

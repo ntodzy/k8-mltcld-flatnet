@@ -28,6 +28,20 @@ default to 60 seconds, can be set to 300 seconds, and print only changed progres
 Packet/CPU sampling remains about once a second; orchestration status polling
 and the scientific sampling interval serve different purposes.
 
+After completion, generate the analysis, component comparison tables and graphs:
+
+```bash
+python3 experiments/analyze_study.py results/extended-study-TIMESTAMP \
+  --output results/extended-study-TIMESTAMP/analysis
+```
+
+This requires the Matplotlib environment described in [aggregation](aggregation.md).
+`--partial` labels interim reports and includes only successful measurement steps.
+The output separates ordinary modes, matched VXLAN, queue controls, attachment
+controls, and MTU comparisons. It also retains evidence tables and profiling
+results, including estimated physical-host CPU-seconds per application GB;
+guest CPU is not added again to host CPU accounting.
+
 ## Additional observations
 
 The controller discovers the experiment namespace's actual Pod UIDs and nodes.
@@ -77,6 +91,10 @@ Profiling uses software CPU-clock samples at 49 Hz on both endpoint VMs and
 their hypervisors, avoiding dependence on guest hardware performance counters.
 Raw `perf.data` and text reports are retained. Profiles are diagnostic runs;
 their throughput is not pooled with unprofiled results.
+The same separate profile records `skb:kfree_skb` drop reasons and locations for
+up to 15 seconds into `drops.data`, with summarized counts in the diagnostic
+stream. These events are system-wide and not filtered to the benchmark flow;
+reason counts alone do not establish where a particular TCP segment was lost.
 
 ## Bridge attachment control
 
