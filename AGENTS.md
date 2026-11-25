@@ -79,6 +79,15 @@ interfaces, or select an experiment.
   the guests while retaining the physical host tunnel and bridge. They are not
   the host TC shortcut. Reset is required to restore their guest prerequisites;
   never relabel them through --reuse-base. See docs/experiments/host-latency-optimization.md.
+- `with_cpu_latency.py --limit-us 10 -- COMMAND`: command-scoped physical-host
+  idle policy, verified restoration and lease-expiry cancellation. Wrap run.py,
+  not another lock-owning study/collector. Default lease one hour; study cases
+  keep their ten-minute fallback. Check both wrapper and benchmark metadata.
+- `docs/results-guide.md` is the paper's result-selection index. Keep A mode-only
+  baselines, B guest forwarding/custom TC controls, C idle policy, D default-idle
+  throughput and E queue/affinity interventions separate. Select successful
+  attempts/conditions from manifests; never pool smoke/trace/profile reports
+  into primary results or call BPF-plus-idle results an unoptimized mode switch.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run

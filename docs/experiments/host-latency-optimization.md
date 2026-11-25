@@ -39,7 +39,7 @@ This retains the existing physical NIC configuration and one-queue settings;
 it does not run a separate NIC optimization/restoration preparation stage.
 Single-policy collections provide replicated measurements, not a paired idle-policy effect.
 
-Each sample is a pair of separate Cilium CLI invocations at default hypervisor
+With both policies selected, each sample is a pair of separate Cilium CLI invocations at default hypervisor
 CPU idle policy and a temporary 10 µs latency-QoS request on both physical hosts.
 Pair order alternates AB/BA. VM boots, queues, NIC identities and worker CPU
 masks are checked against the unchanged block environment. Each invocation has
@@ -53,6 +53,28 @@ latency, set CPU frequency or enable busy polling. Disallowing deep idle can
 increase power consumption. No physical power or energy measurement is made.
 Idle-state counters cover the whole invocation, including Pod startup, while
 ordinary CPU/TCP diagnostics use the observed active benchmark window.
+
+For an individual benchmark with temporary idle tuning, first prepare the
+desired experiment, then use the command-scoped wrapper:
+
+```bash
+python3 experiments/setup.py host-vxlan-routing-bpf-1450 --reset
+python3 experiments/with_cpu_latency.py --limit-us 10 -- \
+  python3 experiments/run.py host-vxlan-routing-bpf-1450 \
+    --client worker-1 --server worker-2 --pod-only --diagnostics \
+    --samples 5 --duration 30
+```
+
+The wrapper holds the collection lock, verifies both remote policy requests,
+stops the child if a lease expires, and verifies restoration when the command
+finishes or fails. It saves `policy.json` and raw request/idle-state records under
+its printed result directory. Its default maximum lease is one hour, configurable
+with `--lifetime` up to two hours; the study's per-invocation helpers retain their
+ten-minute fallback. Accept an idle-tuned result only if both the benchmark and
+wrapper metadata passed. Wrap `run.py`, which does not take the local collection
+lock itself; do not nest this around `collect.py` or a study coordinator that
+owns the same lock or manages its own idle-policy contrasts. Do not run it
+alongside the supervised collection.
 
 The prerequisite-matched host profiles differ only in Cilium guest
 `hostLegacyRouting`. Comparing those profiles still involves fresh cluster/VM
@@ -94,3 +116,8 @@ CSV/JSON and PNG/SVG plots. Mean sample P99 is not a pooled packet percentile.
 Failed attempts and instrumented phases are excluded. `--partial` explicitly
 labels an unfinished analysis. Detailed per-core, thread, queue, offload and Pod
 TCP diagnostics remain available through the ordinary aggregation utility.
+
+The [results selection guide](../results-guide.md) distinguishes original
+mode-only baselines, supported guest forwarding, our custom host TC shortcut,
+idle tuning and throughput validation. Use its exact attempts/filters when
+building a paper table instead of aggregating every result folder together.

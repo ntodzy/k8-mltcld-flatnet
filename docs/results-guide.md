@@ -38,6 +38,11 @@ inner MTU 1450, physical MTU 1500, worker-1 → worker-2.
 attempt 2 was resumed in the original collection; do not discard it or restart
 the collection when selecting the data.
 
+A1 predates the later Pod-namespace and per-thread observability fixes. Its
+Cilium CLI performance measurements remain useful as the original comparison;
+use A2's later diagnostics for Pod TCP/retransmission and host-backend attribution.
+Host-namespace TCP counters from an early run are not ordinary Pod TCP counters.
+
 ### A2 — Primary monitored rerun baseline
 
 Root: [`results/extended-study-20261125T042706Z/`](../results/extended-study-20261125T042706Z/).
@@ -150,6 +155,10 @@ its throughput with the 400 µs idle-tuned RR values as though both were measure
 under one configuration. No throughput estimate is accepted until the relevant
 measurement passes; final collection success also requires baseline restoration.
 
+D has no fresh legacy-prerequisite throughput control. Comparing D against A2
+also crosses collection/boot blocks and prerequisite settings; describe it as a
+configuration comparison rather than an isolated causal BPF throughput saving.
+
 ## E — Other optimizations and diagnostics: keep separate
 
 Within A2's `extended-study` root, `host-1450-two-queues*`,
@@ -170,3 +179,23 @@ question, group and exact successful attempt first; then use its original
 reports and diagnostics. Tables and figures should say **A mode-only**, **B BPF
 forwarding**, **C idle-policy control**, **D forwarding-only throughput**, or
 **E queue/affinity intervention** explicitly.
+
+## Regenerate the separated paper figures
+
+After the supervised throughput collection passes:
+
+```bash
+python3 experiments/analyze_followup.py \
+  --baseline results/extended-study-20261125T042706Z \
+  --latency results/host-latency-20261125T183320.140179Z \
+  --throughput results/host-followup-workflow-20261125T194314.961685Z/throughput \
+  --output results/host-followup-workflow-20261125T194314.961685Z/paper-analysis
+```
+
+Use the [Matplotlib environment](experiments/aggregation.md). The exporter
+creates separate A2 mode-only, B2 default-idle forwarding, C idle-control and D
+default-idle throughput figures, plus `selection.json`, `metrics.json`, CSV and
+a report. C's selection records its exact same-mode/default control source.
+Before throughput passes, `--partial` omits D estimates entirely and labels the
+report interim; choose a new output directory for each export. B1 short smokes,
+E queue tuning and instrumented timings are excluded from these figures.

@@ -1,6 +1,7 @@
 # Host VXLAN latency follow-up
 
-This investigation is in progress. It extends the earlier completed studies;
+The repeated latency comparison is complete; throughput validation is supervised
+separately. This follow-up extends the earlier completed studies;
 the paper's original mode measurements remain unchanged. The question is whether
 we can make hypervisor encapsulation competitive without conflating tunnel
 placement, guest forwarding, host bridge forwarding and CPU idle policy.
@@ -8,7 +9,7 @@ In this framework, Cilium encapsulation already runs in the Kubernetes VM's
 kernel. Physical-host placement moves that work into the hypervisor kernel.
 Both retain Pod namespaces, guest Cilium processing and virtio transport.
 
-## A repeatable initial improvement
+## C supporting screening — Idle tuning on the original host profile
 
 The first follow-up block retained the existing host-vxlan-1450 cluster, VM
 boots, guest queues, CPU masks, bridge/TAP attachments, MTUs and Cilium values.
@@ -49,7 +50,7 @@ The original reports, paired observations, CPU policy/restoration evidence and
 plots are retained under
 [`results/host-latency-20261125T181639.324738Z/`](../results/host-latency-20261125T181639.324738Z/).
 
-## Shortening guest forwarding while retaining physical VXLAN
+## B2 — BPF guest forwarding, with C idle controls kept separate
 
 The prerequisite-matched **legacy guest-routing control** has now completed
 five 30-second invocations per idle policy within the larger ongoing collection:
@@ -94,7 +95,7 @@ vhost handle_tx around 105–107 µs; these overlapping measurements cannot be a
 to reconstruct an end-to-end RTT. Evidence is in the same collection's
 host-vxlan-routing-bpf-1450-instrumented-trace-attempt-1 directory.
 
-## Matching both custom tunnel placements
+## B2/C — Matching both custom tunnel placements
 
 Custom guest VXLAN with BPF guest forwarding has now completed the same five
 30-second invocations per policy. Its default mean was 759 ± 179 µs and
@@ -138,7 +139,7 @@ encapsulation alone. Native routing removes the overlay entirely, so its earlier
 advantage motivates the study without proving that relocating an unchanged
 overlay will automatically reproduce that advantage.
 
-Separate instrumented checks will verify the requested guest forwarding mode
+Separate instrumented checks verify the requested guest forwarding mode
 and executed Linux functions, including physical versus guest VXLAN transmit.
 Their timings are inclusive and probe-perturbed, and are excluded from primary
 latency estimates. A configured BPF flag alone is insufficient evidence that
@@ -146,6 +147,20 @@ the intended path executed. The supported forwarding requirements are described
 in [Cilium's host-routing documentation](https://docs.cilium.io/en/stable/operations/performance/tuning/#ebpf-host-routing).
 
 ## Other potential limits
+
+The fresh Cilium reference completed five runs per policy: default
+759.718 ± 122.518 µs and constrained 400.440 ± 25.327 µs. Under the constraint,
+the three observed means are 400.762 µs for physical VXLAN with BPF guest
+forwarding, 408.726 µs for custom guest VXLAN with BPF forwarding, and
+400.440 µs for Cilium. This is the C idle-controlled comparison, not A's mode-only
+baseline. The nearly equal point means do not establish statistical equivalence
+or a universal placement advantage. At default policy the physical mean remained
+about 6.7% above the fresh Cilium mean, with substantial variation.
+
+The [completed latency tables and figures](../results/host-latency-20261125T183320.140179Z/analysis/report.md)
+retain all individual observations and paired idle effects. The original
+mode-only data, BPF-only defaults and idle-controlled cases are selected separately
+in [the results guide](results-guide.md).
 
 The live physical NICs use mlx4_en. Their reported fixed capabilities do not
 include UDP tunnel segmentation or tunnel-port offload. Interrupt moderation
@@ -169,6 +184,7 @@ and [the configuration exported by ethtool](https://github.com/torvalds/linux/bl
 
 Reproduction and analysis commands are in
 [the experiment guide](experiments/host-latency-optimization.md). The larger
-Cilium latency reference and queued throughput validation remain unfinished. The host optimization
-benefit above is measured; its relative ranking against those references is
-not yet established.
+latency comparison has passed all 49 steps including restoration. Throughput
+validation is supervised separately at default idle policy only. The baseline,
+BPF and idle conditions must remain distinct; use [the result-selection index](results-guide.md)
+for exact accepted source directories and exclusions.
