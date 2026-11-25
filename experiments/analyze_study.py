@@ -188,19 +188,27 @@ def compact_figures(output, main, measurements):
             fig.savefig(output / f'mode-overview.{suffix}', dpi=180)
         plt.close(fig)
 
-    names = [name for name in ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored') if name in measurements]
-    if names:
-        labels = [{'host-1450-baseline': 'One queue (before)', 'host-1450-two-queues': 'Two queues',
-                   'host-1450-restored': 'One queue (restored)'}[name]
+    for stem, title, conditions in (
+        ('queue-overview', 'Queue intervention and reversal',
+         {'host-1450-baseline': 'One queue (before)', 'host-1450-two-queues': 'Two queues',
+          'host-1450-restored': 'One queue (restored)'}),
+        ('affinity-overview', 'Vhost affinity intervention and reversal, with two queues',
+         {'host-1450-two-queues-repeat': 'Unpinned (before)', 'host-1450-pinned': 'Pinned',
+          'host-1450-unpinned': 'Unpinned (restored)'}),
+    ):
+        names = [name for name in conditions if name in measurements]
+        if not names:
+            continue
+        labels = [conditions[name]
                   + f" (n={len(measurements[name]['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []))})" for name in names]
         fig, axes = plt.subplots(1, 2, figsize=(12, 3.5), layout='constrained')
         panel(axes[0], labels, [[value * .001 for value in measurements[name]['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])]
                                 for name in names], 'Four-stream throughput', 'Gb/s')
         panel(axes[1], labels, [diagnose(measurements[name])[0].get('estimated_host_cpu_seconds_per_GB', [])
                                 for name in names], 'Physical-host processing cost proxy', 'CPU-seconds / application GB')
-        fig.suptitle('Queue intervention and reversal: individual samples and mean ± sample SD', fontsize=11)
+        fig.suptitle(title + ': individual samples and mean ± sample SD', fontsize=11)
         for suffix in ('svg', 'png'):
-            fig.savefig(output / f'queue-overview.{suffix}', dpi=180)
+            fig.savefig(output / f'{stem}.{suffix}', dpi=180)
         plt.close(fig)
 
 
@@ -341,6 +349,8 @@ def report(directory, output, partial=False):
                 describe(d.get('worker-1/retrans_per_1000_outsegs', [])), describe(d.get('worker-1/data_rtt_ms', []))])
     if affinity_rows:
         text.append(aggregate.table(['Control', 'n', 'Multi Gb/s', 'Sender retrans/1000 OutSegs', 'Sender data RTT ms'], affinity_rows))
+        text += ['', '![Vhost affinity intervention and reversal](affinity-overview.png)', '',
+                 '[Export figure as SVG](affinity-overview.svg)', '']
         text.append('Only worker vhost thread CPU masks change in this control. Two distinct physical cores are selected within the NIC NUMA node where available, avoiding SMT siblings and preferring nonzero logical CPU IDs. '
                     'Guest vCPU and IRQ masks are not pinned. Original masks are restored and a second unpinned run checks reversibility. This is not full NUMA tuning or a contention test.')
     else:

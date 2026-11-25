@@ -1,6 +1,84 @@
 # Work handoff
 
-## Active overnight work (November 24–25)
+## Completed overnight study (November 25)
+
+The authorized work is complete. `results/extended-study-20261125T042706Z/collection.json`
+reports **passed, 48/48 steps**. There are 25 successful measurement steps and
+210 phase reports, including four separate profiles with all 16 target profiles
+successful. All eight existing modes plus bridge1450 were rerun with guest and
+hypervisor monitoring. Four failed attempts remain preserved/excluded; repairs
+included optional JSON parsing, capture-direction interpretation, vhost task-group
+discovery, and stable custom-tunnel MAC initialization across reboot.
+
+Read `report.md` for the written findings and the study's `analysis/report.md`
+for detailed tables, profiles, CSV/JSON, and 62 PNG plus 62 SVG figures.
+The final state audit is `final-state-audit.json`. It verifies host-vxlan-1450,
+physical MTU1500, guest/bridge/tunnel MTU1450, one queue on every guest, broad
+original vhost masks, four Ready nodes, no benchmark namespaces or perf/tcpdump/
+netperf processes. Both physical NICs negotiated10Gb/s. No push was performed.
+The base deployment config and SSH credentials were preserved.
+
+Key outcomes: host two queues4.013→5.601Gb/s (+39.6%), reversal3.854; separate
+vhost affinity A/B/A5.664→6.427→5.665Gb/s (+13.5%). Combined versus fresh host
+one-queue baseline3.835 is +67.6%, with lower physical-host CPU cost/GB. The
+queue intervention helped Cilium only~1%, at higher CPU cost, and per-VM VXLAN
+~12.5%, also at higher CPU cost and retransmissions. Baseline matched-mode
+ranking depends on workload: Cilium lowest RR, per-VM highest multi, host highest
+single. Bridge no-tunnel multi8.858Gb/s rules out the bridge alone as the full
+explanation for host overlay throughput. No contention, multi-VM scaling, Cilium
+tuning profiles, or Hubble toggles were run. Do not mix tuned controls into the
+main equal-settings mode ranking. No required work remains.
+
+Initial user-requested Git snapshot is `f589e34`; subsequent local commits
+contain implementation and repairs. The final documentation/analysis checkpoint
+can be found with `git log`. Results/generated configuration remain ignored.
+
+## Overnight execution notes (historical)
+
+
+11:31 UTC update: VM queue2 control passed (multi5.245 ±0.504 vs one4.662
+±0.136 Gb/s), but its restored-one-queue run failed: reboot-created cs740vx
+devices had persistent/random MACs instead of static02:74 peers. Ubuntu's
+default99-default.link applies MACAddressPolicy=persistent. Fixed startup to
+wait for udev settling before applying the intended MAC; added fail-closed
+MAC/MTU/state preflight using existing snapshots. Snapshot2ecb9ee,88 tests.
+Repaired all4 existing guest scripts with backups, restarted services, rebooted
+onlyworker1/2, verified static MACs afterward and full-size1450 tunnel pings.
+Audit is under vm-tunnel-startup-repair/. All86 saved endpoint snapshots from
+successful prior VM modes had correct static MACs, so retain those results.
+Resumed PID1293370 from vm-vxlan-1450-restored-queue-control-attempt-2. Remaining:
+that3-sample reversal, VM profile, direct1450 profile setup+run, finalhost setup.
+Four failed attempts total so far; all are preserved/excluded from aggregates.
+
+Cilium queue control completed too: one queue4.148 ±0.128 Gb/s (n3), two
+queues4.190 ±0.276 (n5), restored3.996 ±0.107 (n3). CPU-cost proxy
+12.566→14.201→12.572 CPU-s/GB: more CPU without material throughput gain.
+Two queues were verified live; receiver significant RX queues1.6±0.548 means
+some invocations concentrated traffic in one queue despite two configured.
+Cilium profile passed on all4 targets. Remaining plan is currently setting up
+vm-vxlan-1450 for its queue controls, then direct1450 profile/final host restore.
+
+Host affinity A/B/A has now completed successfully: unpinned two queues
+5.664 ±0.035 Gb/s (n3), pinned6.427 ±0.147 (n5), restored masks5.665 ±0.094
+(n3). Pinned CPU-cost proxy9.825 ±0.277 CPU-s/GB versus10.647 ±0.223 before
+and10.616 ±0.073 after. Sender retrans/1000OutSegs4.264→3.428→4.101.
+All broad [0..15] masks and original one-queue drivers restored. Study is now
+at vxlan-queue-control-setup (31/48 passed); follow the remaining existing plan.
+Pinning gain~13.5% is repeatably reversible in this workload. Compared to the
+fresh host one-queue baseline3.835 Gb/s, combined queues+pinning gain~67.6%,
+but do not compare this tuned result as an equal-settings implementation ranking.
+
+Latest: initial22 passed and the full48-step plan is running. Final host baseline
+passed (single3.603 ±0.157, multi3.835 ±0.109 Gb/s, meanRR1001.836 ±12.392µs).
+Final two-queue repeat passed. First pin step failed before any change because
+vhost workers are QEMU task-group threads on this kernel, not top-level /proc
+processes. Fixed discovery to search QEMU/task plus legacy /proc leaders, tested
+87 unit checks, local snapshot997a22a, resumed PID1244315. Pin attempt2 PASSED:
+both workers' three vhost tasks have verified masks [1],[2],[1]. The five pinned
+samples are running. Original broad masks are saved and will be restored next;
+then three unpinned samples, queue restore, Cilium and VM queue controls/profiles,
+direct1450 profile, and final host1450 setup. No more --append-host-controls:
+the full plan has already been appended; use --resume only on failures.
 
 09:24 UTC update: ALL INITIAL 22 STEPS PASSED. Host VXLAN inner1500 multi
 4.002 ±0.188 Gb/s, mean RR1007.790 ±16.334 µs; VM VXLAN inner1500 multi

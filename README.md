@@ -58,6 +58,7 @@ This resets the cluster between modes and saves all results together.
 
 ## References
 
+- [Completed study results and methodology](report.md)
 - [VXLAN packet paths and bypass options](docs/vxlan-datapath-and-bypass.md)
 - [Collect CPU, queue, offload, and TCP diagnostics](docs/experiments/diagnostics.md)
 - [Aggregate attempts into tables and graphs](docs/experiments/aggregation.md)

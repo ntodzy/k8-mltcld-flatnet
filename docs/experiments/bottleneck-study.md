@@ -161,6 +161,38 @@ Increasing queues is an intervention, not a guaranteed optimization. If throughp
 does not improve, retain that negative result and investigate TCP loss, backend
 contention, and software segmentation rather than enabling unrelated settings.
 
+## Reproduce the host optimization separately
+
+With host-vxlan-1450 already prepared and no collection active, the measured
+two-queue/affinity configuration can be applied and reversed without editing
+Ansible or Terraform. Use fresh audit filenames on subsequent attempts:
+
+```bash
+./experiments/queues.py --queues 2 --vms worker-1 worker-2
+./experiments/affinity.py pin --output results/vhost-pin.json
+./experiments/run.py host-vxlan-1450 --client worker-1 --server worker-2 \
+  --pod-only --diagnostics --test-type multi --samples 5 --duration 30
+./experiments/affinity.py restore --output results/vhost-restore.json
+./experiments/queues.py --restore --vms worker-1 worker-2
+```
+
+Restore affinity before changing queues: queue changes can restart a guest and
+replace its QEMU/vhost task IDs. Pinning covers the worker's vhost tasks, including
+its small management backend; it leaves vCPUs and physical IRQ masks automatic.
+The overnight study restores the original configuration rather than leaving
+this optimization enabled. Results and tradeoffs are in [the report](../../report.md).
+
+## Tunnel startup validation
+
+Custom VM tunnels use static peer MAC addresses. Their startup script waits for
+udev initialization before setting its explicit MAC, avoiding a boot-time race
+with the default persistent-MAC policy. The runner checks the live tunnel MAC,
+MTU and up state from its existing interface snapshot before starting netperf.
+Kubernetes node readiness alone does not verify this separate experiment path.
+The overnight repair was verified by restarting the workers and sending full-size
+tunnel packets; saved snapshots confirmed the intended MAC in all earlier
+successful per-VM measurements.
+
 ## Lifecycle overhead
 
 The runner batches read-only machine snapshots over one SSH connection per

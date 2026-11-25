@@ -44,6 +44,10 @@ interfaces, or select an experiment.
   queue/profile/bridge controls. Reuse its collection lock, preserve retry
   history, and restore queue baselines. `experiments/queues.py` changes only
   worker experiment NIC drivers and gracefully restarts those workers.
+  `experiments/affinity.py` pins/restores only managed worker vhost tasks; discover
+  both QEMU task-group members and legacy separate vhost processes. Restore
+  affinity before queue changes replace task IDs. Status watching defaults to
+  300 seconds; keep scientific sampling independent of orchestration polling.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
@@ -106,6 +110,9 @@ Custom VXLAN uses VNI 740 and UDP 4789. Per-VM forwarding reserves
 `10.245.0.0/24`, `cs740vx`, and route protocol 242. Shared host VXLAN uses
 `cs740br`/`cs740hvx` and a separate configurable VTEP subnet. Verify full-size
 underlay packets without fragmentation before measuring custom VXLAN.
+Wait for udev initialization before applying custom VM tunnel MACs; static peers
+depend on those addresses. Preserve the live MAC/MTU/state preflight rather than
+assuming Kubernetes Ready proves that the custom tunnel is usable.
 
 For comparisons of Cilium/custom VXLAN implementation overhead, use `vxlan`,
 `vm-vxlan-1450`, and `host-vxlan-1450` with the same endpoints and `--pod-only`.
