@@ -191,7 +191,8 @@ def compact_figures(output, main, measurements):
     names = [name for name in ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored') if name in measurements]
     if names:
         labels = [{'host-1450-baseline': 'One queue (before)', 'host-1450-two-queues': 'Two queues',
-                   'host-1450-restored': 'One queue (restored)'}[name] for name in names]
+                   'host-1450-restored': 'One queue (restored)'}[name]
+                  + f" (n={len(measurements[name]['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []))})" for name in names]
         fig, axes = plt.subplots(1, 2, figsize=(12, 3.5), layout='constrained')
         panel(axes[0], labels, [[value * .001 for value in measurements[name]['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])]
                                 for name in names], 'Four-stream throughput', 'Gb/s')
@@ -286,12 +287,13 @@ def report(directory, output, partial=False):
             continue
         m = measurements[name]
         d = evidence[name]['diagnostics']
-        table.append([name, describe(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []), .001),
+        table.append([name, len(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])),
+                      describe(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []), .001),
                       describe(d.get('worker-1/retrans_per_1000_outsegs', [])),
                       describe(d.get('worker-1/data_rtt_ms', [])),
                       describe(d.get('hypervisor-node1/busiest_vhost_cpu', [])),
                       describe(d.get('estimated_host_cpu_seconds_per_GB', []))])
-    text.append(aggregate.table(['Control', 'Multi Gb/s', 'Sender retrans / 1000 OutSegs', 'Sender data RTT ms',
+    text.append(aggregate.table(['Control', 'n', 'Multi Gb/s', 'Sender retrans / 1000 OutSegs', 'Sender data RTT ms',
                                  'Busiest sender-host vhost % of one CPU', 'Estimated host CPU-s / GB'], table))
     if table:
         text += ['', '![Queue intervention and reversal](queue-overview.png)', '',

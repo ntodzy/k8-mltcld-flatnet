@@ -2,6 +2,16 @@
 
 ## Active overnight work (November 24–25)
 
+09:24 UTC update: ALL INITIAL 22 STEPS PASSED. Host VXLAN inner1500 multi
+4.002 ±0.188 Gb/s, mean RR1007.790 ±16.334 µs; VM VXLAN inner1500 multi
+4.486 ±0.404, mean RR982.320 ±43.512. Bridge1450 control multi8.858 ±0.258,
+single5.861 ±0.507, mean RR789.898 ±109.999. Thus the bridge alone does not
+explain the overlay's throughput deficit, though attachment affects latency.
+Next action is the already implemented append-host-controls command below,
+which appends the remaining 26 steps. Scope is frozen at these 48 total steps
+unless an execution failure requires a repair. Complete them, generate final
+analysis/report and local Git snapshot, verify original host1450 one-queue state.
+
 07:27 UTC update: VM-local attempt 2 passed its full measurements (multi
 24.080 ±0.510 Gb/s, mean RR109.706 ±1.830 µs). Cilium VXLAN passed (multi
 4.015 ±0.181 Gb/s, mean RR821.668 ±53.065 µs). Thus its multistream result
