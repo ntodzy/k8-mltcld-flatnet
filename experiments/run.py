@@ -67,6 +67,14 @@ def validate_runtime_routing(status, mode):
         raise ValueError(f'Active Cilium routing must be Native / {wanted}; got {routing}')
 
 
+def validate_tunnel_receipts(proof):
+    # Each receiver proves activity on the opposite transmission leg. A TX
+    # packet counter can remain zero on this testbed despite successful traffic;
+    # retain that anomaly rather than equating it with no transmission.
+    if len(proof) != 2 or any(p['packet_deltas']['rx'] <= 0 for p in proof.values()):
+        raise ValueError('Both custom VXLAN receivers must show activity; refusing a bypass result')
+
+
 def cpu_counts(text):
     values = next(line for line in text.splitlines() if line.startswith('cpu ')).split()[1:]
     # guest and guest_nice are already included in user/nice, so exclude them.
@@ -301,26 +309,25 @@ def main():
                     log.write(line)
                     log.flush()
                 metadata['exit_code'] = process.wait()
-        if bypass:
-            session, bypass = bypass, None
-            session.stop()
         # Save performance reports before collecting optional diagnostic snapshots.
         with (output / 'reports.tar.gz').open('wb') as archive:
             subprocess.run(ssh_command(ssh_config, controller,
                                        ['sudo', '-n', 'tar', '-C', remote_dir, '-czf', '-', '.']),
                            stdout=archive, check=True)
         metadata['report_count'] = unpack_reports(output / 'reports.tar.gz', output / 'reports')
+        if bypass:
+            session, bypass = bypass, None
+            session.stop()
         if guest_tunnel_before:
             proof = {}
             for name, initial in guest_tunnel_before.items():
                 final = json.loads(remote(ssh_config, name, ['ip','-j','-s','link','show','dev','cs740vx']))[0]
                 deltas = {direction:final['stats64'][direction]['packets']-initial['stats64'][direction]['packets']
                           for direction in ('rx','tx')}
-                proof[name] = {'before':initial,'after':final,'packet_deltas':deltas}
-                if not all(v > 0 for v in deltas.values()):
-                    save_json(output/'guest-tunnel-activity.json',proof)
-                    raise ValueError(f'{name}: custom VXLAN has no bidirectional activity; refusing a bypass result')
+                proof[name] = {'before':initial,'after':final,'packet_deltas':deltas,
+                               'tx_packet_counter_advanced':deltas['tx'] > 0}
             save_json(output/'guest-tunnel-activity.json',proof)
+            validate_tunnel_receipts(proof)
         cpu = {}
         for label, target in targets.items():
             try:

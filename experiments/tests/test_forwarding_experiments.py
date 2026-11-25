@@ -52,6 +52,14 @@ class ForwardingExperimentTests(unittest.TestCase):
         status['routing']['inter-host-routing-mode']='Tunnel'
         with self.assertRaises(ValueError):runner.validate_runtime_routing(status,'vm-vxlan-bpf-1450')
 
+    def test_tunnel_receipts_verify_both_legs_without_trusting_broken_tx_stats(self):
+        proof={'a':{'packet_deltas':{'rx':4988,'tx':4992}},
+               'b':{'packet_deltas':{'rx':4989,'tx':0}}}
+        runner.validate_tunnel_receipts(proof)
+        proof['b']['packet_deltas']['rx']=0
+        with self.assertRaises(ValueError):runner.validate_tunnel_receipts(proof)
+        with self.assertRaises(ValueError):runner.validate_tunnel_receipts({'a':proof['a']})
+
     def test_only_ready_unique_nonhost_benchmark_endpoints_are_selected(self):
         def pod(node,ip,ready=True,host=False):
             return {'spec':{'nodeName':node,'hostNetwork':host},

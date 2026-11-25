@@ -24,6 +24,7 @@ the tunnel, FDB and outer UDP/IP transmission. Other traffic follows the existin
 bridge. Guest Cilium programs and policies are not replaced.
 
 The **guest pair uses supported Cilium host routing**, not the raw lab program.
+Here Cilium's "host" is the Kubernetes VM, not the physical hypervisor.
 Cilium's TCX programs can terminate a hook before legacy TC executes; simply
 appending our lab program would not establish acceleration. Placing it before
 Cilium could skip policy processing. Instead both guest profiles enable BPF
@@ -90,6 +91,11 @@ an isolated per-packet encapsulation cost.
 Host results contain `host-bpf/`: exact Pod identities, copied source/object,
 compiler output, agent source, preflight links/hooks/TAP, program/map IDs,
 per-direction matched/redirected/passed counters, readiness and restoration.
+Counters cover the attachment lifetime, including netperf control/setup traffic,
+and use shared atomic updates; they are path evidence, not an exclusive count
+of application transactions. Both host controls incur the counter operations.
+Preflight also records bridge FDB and bridge-netfilter settings; the shortcut
+can skip enabled bridge-netfilter work as well as the bridge lookup itself.
 Selected mode actions must carry traffic on all four attachments. The runner
 refuses a passed result without those counters. It refuses existing classic
 filters or TCX on the selected host ports and never replaces Cilium programs.
@@ -98,7 +104,12 @@ Guest results save actual endpoint-agent `cilium-dbg status --output json` outpu
 Both agents must report the requested **routing.intra-host-routing-mode** as
 **Legacy/BPF** and their inter-host mode as Native; the ConfigMap
 must match all prerequisites. Static custom routes are validated, and before/
-after `cs740vx` counters must show bidirectional activity on both endpoint VMs.
+after `cs740vx` receive counters must advance on both endpoint VMs, proving
+activity on both transmission legs. All TX counters are also retained. One live
+control showed a non-advancing worker-2 TX packet counter despite about 5,000
+receipts at each end and successful TCP transactions; it is recorded as an
+anomaly rather than interpreted as zero actual transmission. Its cause has not
+been isolated.
 Device activity alone is not an exact per-flow trace. Use a separate bounded
 kernel trace if claiming how many ordinary forwarding calls were eliminated.
 A configured flag alone is insufficient to claim stack bypass or a speedup.
@@ -132,8 +143,9 @@ before treating any research profile as a general deployment recommendation.
 
 ## Cleanup and restore the original cluster
 
-Host programs are descriptor/session scoped: the runner closes the host-agent
-input after measurement; the agents collect counters, delete only their own
+Host filters use classic TC and require explicit removal; closing a program
+descriptor does not automatically detach them. A lifetime-scoped agent handles
+this: the runner closes its input after measurement; the agents collect counters, delete only their own
 filters, and remove only empty qdiscs they created. EOF, SIGTERM and a bounded
 lifetime also trigger cleanup. A failed cleanup retains
 `infrastructure/generated/forwarding-control.json`, and normal runs/setup refuse

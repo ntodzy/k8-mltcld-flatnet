@@ -53,7 +53,9 @@ def run(spec):
                 raise RuntimeError('Unexpected TCX attachment on a selected host port')
         plans = [(tap,'cs740hvx',spec['local_ip'],spec['remote_ip']),
                  ('cs740hvx',tap,spec['remote_ip'],spec['local_ip'])]
-        emit({'kind':'preflight','tap':tap,'links':links,'hooks':net})
+        bridge_nf={p.name:p.read_text().strip() for p in Path('/proc/sys/net/bridge').glob('bridge-nf-*')}
+        emit({'kind':'preflight','tap':tap,'links':links,'hooks':net,
+              'bridge_netfilter':bridge_nf,'fdb':data(['bridge','-j','fdb','show','br','cs740br'])})
         with tempfile.TemporaryDirectory(prefix='cs740-host-bpf-') as tmp:
             obj = Path(tmp)/'redirect.o';obj.write_bytes(base64.b64decode(spec['object']))
             for ingress, output, source, destination in plans:

@@ -57,6 +57,9 @@ No Cilium eBPF tuning profile is silently enabled.
 
 # Separate samples/tests and monitor both VMs and hypervisors.
 ./experiments/collect.py --modes direct-1450 vxlan --diagnostics --background
+
+# Latency only: omit single/multistream throughput workloads.
+./experiments/collect.py --modes direct-1450 vxlan --diagnostics --test-type rr --background
 ```
 
 For the three implementations at equal inner MTU, use:
@@ -72,6 +75,10 @@ approximately 23 minutes plus three cluster setups and diagnostic collection.
 See [matched comparison](matched-vxlan.md) for what is held equal.
 
 Other options are `--config PATH`, `--underlay-subnet CIDR`, and `--output PATH`.
+`--test-type` accepts `all` (default), `rr`, `single`, `multi`, or `throughput`;
+the workload selection is saved and retained on resume. Optional
+[host/guest BPF forwarding experiments](bpf-forwarding.md) can be selected with
+`--modes`; they are excluded from the default eight-mode plan.
 See [diagnostic collection](diagnostics.md) for per-core CPU, queues, offloads,
 TCP counters, and a separate perf profiling option. Diagnostic mode adds Pod
 setup/cleanup per sample/test/path; allow substantially more time than the
