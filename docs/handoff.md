@@ -7,14 +7,20 @@ authorized as needed. Earlier completed-study stop instructions below apply only
 to those earlier studies. Do not interrupt the new studies or launch competing
 setups. Local snapshots 74e665d / 746179f / 3d14966; no push.
 
-Initial same-boot host default/10µs policy screening is active at
-`results/host-latency-20261125T181639.324738Z/` (3 pairs,20sRR). First two pairs:
-default968.16/968.56µs versus10µs501.48/495.15µs. Not a final estimate.
-`/tmp/cs740-queue-host-latency.py` waits for passed completion, then launches
-`host_latency_study.py` with host-vxlan-routing-legacy-1450,
+Initial same-boot host default/10µs screening PASSED at
+`results/host-latency-20261125T181639.324738Z/` (3 pairs,20sRR). Final mean:
+default960.677±13.309µs versus10µs502.360±7.688µs; average P991600→978.667.
+All three paired reductions positive434.86–473.41µs. Final baseline rebuild
+passed. analysis/report.md has final plots/tables. Draft interpretation is in
+docs/host-vxlan-latency-followup.md. No claim of advantage over equally tuned Cilium.
+
+Full study ACTIVE: `results/host-latency-20261125T183320.140179Z/`, PID1535012.
+It runs `host_latency_study.py` with host-vxlan-routing-legacy-1450,
 host-vxlan-routing-bpf-1450, vm-vxlan-bpf-1450, vxlan: five30sRR pairs per mode
-at default/10µs hypervisor policy, plus separate traces. Queue log:
-`/tmp/cs740-queue-host-latency.log`. It refuses to start if predecessor fails.
+at default/10µs hypervisor policy, plus separate traces (49steps incl.setups).
+The temporary shell-background queue helper did not survive its launching shell;
+it never started a second study. Started the durable fork/setsid coordinator
+directly AFTER predecessor passed. Do not use that obsolete /tmp queue helper.
 
 New optional host-routing modes retain physical VXLAN/bridge and change Cilium
 forwarding inside the guests. Their Helm prerequisites match and only legacy
@@ -22,7 +28,10 @@ host routing differs. They are NOT the host TC bridge shortcut. Both endpoint
 agent runtime JSON and physical tunnel receipt counters must validate.
 Mode aliases are excluded from original default8. --reuse-base now rejects
 changed guest profiles, avoiding silent relabeling as original baseline.
-All112 unit tests and cluster syntax validation passed.
+All112 unit tests and cluster syntax validation passed. Snapshot46395fa adds
+optional strict environment guards for NIC coalescing/offloads, CPU idle/frequency
+governors and KVM halt polling in new studies. Legacy latency-study guards keep
+their previous schema by default. Source copies/hashes saved in new result root.
 
 Next: monitor durable manifests at a sensible interval; fix execution failures,
 complete repeated comparisons and separate path traces, analyze with
