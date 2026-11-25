@@ -48,6 +48,13 @@ interfaces, or select an experiment.
   both QEMU task-group members and legacy separate vhost processes. Restore
   affinity before queue changes replace task IDs. Status watching defaults to
   300 seconds; keep scientific sampling independent of orchestration polling.
+- `experiments/latency_study.py`: paired tunnel/bypass latency controls with
+  unchanged VM boots/attachments within each custom mode. Temporary state is
+  `generated/path-control.json`; the runner requires explicit acknowledgement
+  and validates live routes/bridge ports. Route protocol 243 is reserved for
+  temporary bypass routes; 242 remains the custom tunnel route protocol.
+  Restore the tunnel path before changing modes. Keep instrumented timing runs
+  separate from primary latency pairs; inclusive probe durations are not additive.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run

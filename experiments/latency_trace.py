@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -37,10 +38,10 @@ def build_program(spec, functions, tracked, marker_pid):
         raise ValueError('Invalid interface name')
     initial = [f'@role[{int(tid)}]={int(role)};' for tid, role in tracked.items()]
     initial += [f'@device[{json.dumps(device)}]={index + 1};' for index, device in enumerate(devices)]
-    text = ['BEGIN {' + ''.join(initial) + 'printf("CS740_READY\\n");}',
+    text = ['BEGIN { @created=nsecs; ' + ''.join(initial) + 'printf("CS740_READY\\n");}',
             f'tracepoint:syscalls:sys_enter_prctl /pid=={int(marker_pid)} && comm=="cs740-mark" && !@armed/ '
             '{ @armed=nsecs; printf("CS740_STARTED\\n"); }',
-            f'interval:s:1 /@armed && nsecs-@armed>={duration}000000000/ {{ exit(); }}']
+            f'interval:s:1 /(@armed && nsecs-@armed>={duration}000000000) || nsecs-@created>600000000000/ {{ exit(); }}']
     active = f'@armed && nsecs-@armed < {duration}000000000'
     key = 'tid, (tid==0 ? cpu+1 : 0)'
     # Each stack is keyed by task identity, with CPU disambiguation only for
@@ -92,6 +93,9 @@ def build_program(spec, functions, tracked, marker_pid):
                         f'@receive_deferred_ns["{name}"]=stats($gap); '
                         f'@receive_deferred_hist_ns["{name}"]=hist($gap); }} '
                         'delete(@rx_packet[$packet]); delete(@rx_return[$packet]); }')
+    if spec.get('kvm_wakeup_available'):
+        text.append(f'tracepoint:kvm:kvm_vcpu_wakeup /{active} && @role[tid]==1/ {{ '
+                    '@halt_ns[args.waited]=stats(args.ns); @halt_valid_count[args.waited,args.valid]=count(); }')
     text += [
         f'tracepoint:sched:sched_wakeup /{active}/ {{ '
         'if (args.comm=="netperf") { @role[args.pid]=3; } '
@@ -117,7 +121,7 @@ def build_program(spec, functions, tracked, marker_pid):
         '@queue_hist_ns[$device]=hist($elapsed); @queue_max_ns[$device]=max($elapsed); '
         'delete(@queued[$key]); delete(@qdevice[$key]); } }',
         'END { clear(@depth); clear(@begin); clear(@wake); clear(@offcpu); clear(@blocked); '
-        'clear(@queued); clear(@qdevice); clear(@device); clear(@armed); '
+        'clear(@queued); clear(@qdevice); clear(@device); clear(@armed); clear(@created); '
         + ('clear(@rx_stack); clear(@rx_packet); clear(@rx_return); ' if 'vxlan_rcv' in functions else '') + '}',
     ]
     return '\n'.join(text)
@@ -146,6 +150,10 @@ def tracked_tasks(domain):
 
 
 def agent(spec):
+    def terminate(signum, frame):
+        raise SystemExit(128 + signum)
+    signal.signal(signal.SIGTERM, terminate)
+    signal.signal(signal.SIGHUP, terminate)
     def emit(kind, **data):
         print(json.dumps({'kind': kind, 'epoch': time.time(), **data}), flush=True)
     available = Path('/sys/kernel/tracing/available_filter_functions').read_text()
@@ -153,6 +161,9 @@ def agent(spec):
     symbols = {line.split()[0] for line in available.splitlines() if line.strip()}
     spec['handoff_functions'] = {name: arg for name, arg in
         [('napi_gro_receive', 1), ('__netif_receive_skb_one_core', 0)] if name in symbols}
+    wakeup_format = Path('/sys/kernel/tracing/events/kvm/kvm_vcpu_wakeup/format')
+    spec['kvm_wakeup_available'] = bool(spec.get('domain') and wakeup_format.exists()
+                                       and all(field in wakeup_format.read_text() for field in (' ns;', ' waited;', ' valid;')))
     tracked = tracked_tasks(spec.get('domain'))
     timing = {}
     for name, path in {
@@ -167,6 +178,19 @@ def agent(spec):
     timing['cpu0_idle_states'] = [{key: (state / key).read_text().strip()
                                   for key in ('name', 'latency', 'disable') if (state / key).exists()}
                                  for state in Path('/sys/devices/system/cpu/cpu0/cpuidle').glob('state*')]
+    def inspect(arguments):
+        try:
+            result = subprocess.run(arguments, text=True, capture_output=True, timeout=10)
+            return dict(exit_code=result.returncode, output=result.stdout, stderr=result.stderr)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return {'error': str(error)}
+    hooks = {'tc': {}}
+    for device in spec['devices']:
+        if Path('/sys/class/net', device).exists():
+            hooks['tc'][device] = {direction: inspect(['tc', '-j', 'filter', 'show', 'dev', device, direction])
+                                    for direction in ('ingress', 'egress')}
+    hooks['bpf_links'] = inspect(['bpftool', '-j', 'link', 'show']) if shutil.which('bpftool') else {'error': 'bpftool unavailable'}
+    hooks['bpf_net'] = inspect(['bpftool', '-j', 'net', 'show']) if shutil.which('bpftool') else {'error': 'bpftool unavailable'}
     program = build_program(spec, functions, tracked, os.getpid())
     records, ready = [], threading.Event()
     with tempfile.TemporaryFile(mode='w+') as errors:
@@ -191,7 +215,7 @@ def agent(spec):
                     errors.seek(0)
                     raise RuntimeError('bpftrace did not attach: ' + errors.read()[-6000:])
             emit('ready', functions=functions, tracked=tracked, specification=spec,
-                 kernel=os.uname().release, program=program, timing_configuration=timing)
+                 kernel=os.uname().release, program=program, timing_configuration=timing, kernel_hooks=hooks)
             deadline = time.monotonic() + 600
             while process.poll() is None and time.monotonic() < deadline:
                 readable, _, _ = select.select([sys.stdin], [], [], .2)

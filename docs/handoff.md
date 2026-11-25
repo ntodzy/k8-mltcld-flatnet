@@ -1,5 +1,61 @@
 # Work handoff
 
+## Active latency-isolation follow-up (November 25)
+
+User asked to isolate custom encapsulation overhead and explain its latency.
+Authorization for live tests, resets, local Git snapshots/no push persists.
+Current study: `results/latency-isolation-20261125T144819Z/`, PID1390106,
+`latency_study.py --background`. It holds collection.lock. Preserve old datasets.
+Initial checkpoint732a76d, implementation2a87e38, analysis/docs424f2ac.
+No subagents. Do not stop at detached status; finish all tests, report and audit.
+
+Plan30steps: host custom same-boot/same-attachment tunnel vs physical-bridge
+bypass, five balanced AB/BA pairs of30sTCP_RR (one report/case), then separate
+15-second bpftrace observations for tunnel+bypass. SetupVMcustom1450, repeat
+five pairs by switching only remotePodCIDR routes242 vs243 without recreating
+VXLAN devices/sockets/FDB/neighbors, then two trace cases. SetupCilium VXLAN,
+five RR reference samples plus one trace, then restorehost1450. Total25untraced
+RRreports plus5instrumented. No contention/multiVM scaling/Hubble tuning.
+`path_control.py` writes generated/path-control.json; ordinary run.py refuses
+unacknowledged overrides. Explicit --path-control passed through diagnostics.
+Live route/bridge ports validated from existing snapshots. Boot/kernel/queue/
+worker-affinity guards reject changes within each mode. Finally restores path
+on failure (current mode), final successful step restores originalhost mode.
+Resume failed steps with --resume DIR. Do not append anything to old study.
+
+Host firsttwo paired means: bypass547.41 vs tunnel995.57µs (extra448.16),
+then tunnel1005.71 vs bypass809.45µs (extra196.26). Do not generalize n2;
+currentlyhostpair3bypass. Both directions/conditions use same VMs and native
+Ciliumcfg, queues/MTUs fixed. Worker2 kernel now6.8.0-151 vsworker1running147;
+recorded and held fixed within host block. Subsequent setup may boot updates;
+use fresh within-block comparisons, not old dataset subtraction.
+
+Standalone latency_trace.py contains remote agent and TraceSession controller.
+Bpftrace0.20.2 installed on both hosts; guests already had it. Guest+host smoke
+probes attached/exited0. Observers attach beforeCLI, arm through a prctl marker
+only after client sampler sees benchmarkPod netperf, collect~15s. Function
+stats/hist are inclusive+probe-overhead, never sum intoRTT. NarrowbuildSKB and
+pullheader scoped toactiveTX/RX; skb receive→GRO and post-return deferral matched
+by pointer+expectedtunneldev. Scheduler wakeup→run tracks workerQEMU/vhostTIDs
+and localnetperf/netserver. Queue→driver timings device-wide and probe-inflated.
+CPUidle/clocksource/KVMhalt-poll settings saved in ready metadata. No cross-clock
+subtraction. Agentprograms plus rawJSON/stdout/stderr retained undertraces/.
+Pipeline reads latest agent source for each trace, though its coordinator was
+loaded at launch. Agent metadata/scoping changed after initialsmokes and before
+first realtrace; finalgeneratedprograms are canonical.
+
+Analyze with `experiments/analyze_latency.py DIR --output NEWDIR [--partial]`.
+Matplotlib env: LD_LIBRARY_PATH=/nix/store/dqj57l1prad38vjrad4bs9d977i4q5zm-gcc-15.3.0-lib/lib,
+PYTHONPATH=/tmp/cs740-plot-deps, MPLCONFIGDIR=/tmp/cs740-matplotlib.
+Tables/CSV include paired differences, tracer perturbation, function timings,
+scheduling/handoff/queue stats. HistogramP99 is upperbin, not exactpercentile.
+5newunitchecks pass; fullsuite91 passed before2newanalysis tests (=93 now).
+Run fullsuite after study restores marker; during override ordinaryCLIguard is
+intentionally active. Final tasks: finish live study, diagnose trace errors,
+generate/inspect analysis+figures, write actual findings into report.md, final
+read-only audit, cleanGit localcommit/no push. Consider follow-up idle/wakeup
+control only if observations warrant it; no such tuning is implemented yet.
+
 ## Completed overnight study (November 25)
 
 The authorized work is complete. `results/extended-study-20261125T042706Z/collection.json`

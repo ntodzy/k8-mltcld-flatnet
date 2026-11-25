@@ -49,6 +49,10 @@ worker vhost backend functions, device queue-to-driver observations, and
 wakeup-to-run scheduling latency. The same skb is followed from VXLAN receive
 to the next receive/GRO stage when possible. All durations use one kernel's
 clock; guest, host and remote-host timestamps are never subtracted.
+Available KVM halt-wakeup observations distinguish the reported waited flag;
+their duration includes legitimate event waiting. CPU idle/clocksource/halt-poll
+configuration and TC/BPF link attachments (including TCX where bpftool supports
+it) are captured before the instrumented benchmark. Missing tools remain explicit.
 
 Function durations include nested work and instrumentation overhead. Device
 observations include other traffic on that device. Helper routines and inclusive

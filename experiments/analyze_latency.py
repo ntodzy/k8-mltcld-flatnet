@@ -45,6 +45,7 @@ def trace_rows(directory, step):
         devices = ready['specification']['devices']
         for name, family in [('@function_ns', 'function'), ('@wakeup_ns', 'wakeup'),
                              ('@queue_ns', 'queue'), ('@offcpu_ns', 'offcpu'),
+                             ('@halt_ns', 'halt'),
                              ('@receive_handoff_ns', 'receive_handoff'), ('@receive_deferred_ns', 'receive_deferred')]:
             for key, values in maps.get(name, {}).items():
                 if family == 'function':
@@ -53,6 +54,8 @@ def trace_rows(directory, step):
                     label = devices[int(key) - 1]
                 elif family == 'wakeup':
                     label = {'1': 'vcpu', '2': 'vhost', '3': 'netperf', '4': 'netserver', '5': 'qemu-other'}.get(key, key)
+                elif family == 'halt':
+                    label = 'waited=' + key
                 else:
                     label = key
                 prefix = name.removesuffix('_ns')
@@ -221,7 +224,7 @@ def report(directory, output, partial=False):
              'select IPv4 TCP between Pod addresses in 10.244.0.0/16; tunnel and backend observations are device/task scoped '
              'and can include other traffic. No guest/host or cross-host clocks are subtracted.', '',
              '## Scheduling, receive handoff and device queue observations', '']
-    selected = [row for row in traces if row['family'] in ('wakeup', 'receive_handoff', 'receive_deferred', 'queue')]
+    selected = [row for row in traces if row['family'] in ('wakeup', 'receive_handoff', 'receive_deferred', 'queue', 'halt')]
     text += [aggregate.table(['Mode/condition', 'Machine', 'Metric/stage', 'Count', 'Mean µs', 'P99 upper bin µs'],
                             [[row['mode'] + '/' + row['condition'], row['target'], row['family'] + '/' + row['stage'], row['count'],
                               f'{row["mean_us"]:.3f}', f'{row["p99_bin_upper_us"]:.3f}' if row['p99_bin_upper_us'] else 'unavailable'] for row in selected]), '',
@@ -231,7 +234,9 @@ def report(directory, output, partial=False):
              'receive_deferred starts at the receive callback return only where that return precedes the match. '
              'Counts show coverage; dropped, cloned or coalesced buffers may not match. Queue-to-driver timings are device-wide '
              'and include tracing/bookkeeping overhead. Off-CPU statistics remain in the CSV: blocked time often includes '
-             'legitimate waiting for network data and must not be counted entirely as scheduler overhead.', '',
+             'legitimate waiting for network data and must not be counted entirely as scheduler overhead. '
+             'KVM halt duration and its waited flag describe halt polling/blocking behavior for the selected worker vCPUs; '
+             'the duration includes waiting for an event, so it is not itself additional encapsulation overhead.', '',
              '## Reproducibility and boundaries', '',
              f'Source: `{directory}`. Starting Git snapshot: `{state["git_snapshot"]}`. '
              'Original reports, traces, generated BPF programs, path audits, environment guards, retry history and restoration evidence '
