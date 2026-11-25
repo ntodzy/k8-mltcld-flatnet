@@ -60,7 +60,7 @@ def diagnose(measurement, test='multi'):
                         for metric in ('dropped', 'errors'):
                             if counters.get(metric, 0) > 0:
                                 details.append(f'{phase["directory"]}: {target}/{interface} {direction}/{metric}={counters[metric]} (whole invocation)')
-            if target in ('worker-1', 'worker-2'):
+            if not target.startswith('hypervisor-'):
                 busy = data.get('per_core', {}).get('cpu', {}).get('busy_percent')
                 if busy is not None:
                     result[target + '/busy'].append(busy)
@@ -144,6 +144,58 @@ def export_group(output, name, measurements):
     return f'{name}/summary.md'
 
 
+def compact_figures(output, main, measurements):
+    """Export paper-sized comparisons with short labels and visible samples."""
+    import matplotlib.pyplot as plt
+
+    def panel(axis, names, values, title, unit):
+        for index, samples in enumerate(values):
+            if not samples:
+                continue
+            mean = statistics.mean(samples)
+            sd = statistics.stdev(samples) if len(samples) > 1 else 0
+            axis.scatter(samples, [index] * len(samples), color='#3971ad', alpha=.65, s=20)
+            axis.errorbar(mean, index, xerr=sd, fmt='D', color='#d76500', capsize=3, markersize=5)
+        axis.set_yticks(range(len(names)), names)
+        axis.invert_yaxis()
+        axis.set_xlim(left=0)
+        axis.set_title(title)
+        axis.set_xlabel(unit)
+        axis.grid(axis='x', alpha=.2)
+        axis.set_axisbelow(True)
+
+    labels = [mode for mode in (*MODES, 'bridge-1450') if mode in main]
+    if labels:
+        fig, axes = plt.subplots(2, 2, figsize=(13, max(7, len(labels) * .85)), layout='constrained')
+        for axis, test, metric, scale, title, unit in (
+            (axes[0, 0], 'TCP_STREAM', 'throughput', .001, 'Single-stream throughput', 'Gb/s'),
+            (axes[0, 1], 'TCP_STREAM_MULTI', 'throughput', .001, 'Four-stream throughput', 'Gb/s'),
+            (axes[1, 0], 'TCP_RR', 'mean', 1, 'Request/response mean latency', 'µs'),
+        ):
+            panel(axis, labels, [[value * scale for value in main[mode]['metrics'].get((test, metric), [])]
+                                for mode in labels], title, unit)
+        panel(axes[1, 1], labels, [diagnose(main[mode])[0].get('estimated_host_cpu_seconds_per_GB', [])
+                                  for mode in labels], 'Physical-host processing cost proxy', 'CPU-seconds / application GB')
+        fig.suptitle('Individual samples; orange diamonds = mean ± sample SD\nVM-local uses host-network traffic on one host; other modes use cross-host Pod traffic', fontsize=11)
+        for suffix in ('svg', 'png'):
+            fig.savefig(output / f'mode-overview.{suffix}', dpi=180)
+        plt.close(fig)
+
+    names = [name for name in ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored') if name in measurements]
+    if names:
+        labels = [{'host-1450-baseline': 'One queue (before)', 'host-1450-two-queues': 'Two queues',
+                   'host-1450-restored': 'One queue (restored)'}[name] for name in names]
+        fig, axes = plt.subplots(1, 2, figsize=(12, 3.5), layout='constrained')
+        panel(axes[0], labels, [[value * .001 for value in measurements[name]['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])]
+                                for name in names], 'Four-stream throughput', 'Gb/s')
+        panel(axes[1], labels, [diagnose(measurements[name])[0].get('estimated_host_cpu_seconds_per_GB', [])
+                                for name in names], 'Physical-host processing cost proxy', 'CPU-seconds / application GB')
+        fig.suptitle('Queue intervention and reversal: individual samples and mean ± sample SD', fontsize=11)
+        for suffix in ('svg', 'png'):
+            fig.savefig(output / f'queue-overview.{suffix}', dpi=180)
+        plt.close(fig)
+
+
 def report(directory, output, partial=False):
     state = json.loads((directory / 'collection.json').read_text())
     if state['status'] != 'passed' and not partial:
@@ -171,6 +223,7 @@ def report(directory, output, partial=False):
         evidence[name] = {'diagnostics': diag, 'nonzero_interface_drop_error_counters': details,
                           'metrics': {test + '/' + metric: values for (test, metric), values in measurement['metrics'].items()}}
     save_json(output / 'evidence.json', evidence)
+    compact_figures(output, main, measurements)
     text = ['# Extended networking study: performance and bottleneck analysis', '',
             ('**INTERIM: the study has not completed.**' if state['status'] != 'passed' else '**Completed study.**'), '',
             f'Source: `{directory}`. Initial Git snapshot: `{state.get("git_snapshot")}`. '
@@ -188,6 +241,8 @@ def report(directory, output, partial=False):
                      describe(m.get(('TCP_STREAM_MULTI', 'throughput'), []), .001),
                      describe(m.get(('TCP_RR', 'mean'), [])), describe(m.get(('TCP_RR', 'p99'), []))])
     text.append(aggregate.table(['Mode', 'Single Gb/s', 'Four-stream Gb/s', 'Mean transaction µs', 'Mean sample P99 µs'], rows))
+    text += ['', '![Mode performance and physical-host cost](mode-overview.png)', '',
+             '[Export figure as SVG](mode-overview.svg)', '']
     text += ['', 'P99 values are averages of per-sample percentiles, not pooled percentiles. '
              'VM-local bypasses the Pod path and physical link and should not be ranked as an equivalent overlay workload.', '',
              '## Why the host path scales differently', '']
@@ -205,6 +260,9 @@ def report(directory, output, partial=False):
                       describe(d.get('estimated_host_cpu_seconds_per_GB', []))])
     text.append(aggregate.table(['Control', 'Multi Gb/s', 'Sender retrans / 1000 OutSegs', 'Sender data RTT ms',
                                  'Busiest sender-host vhost % of one CPU', 'Estimated host CPU-s / GB'], table))
+    if table:
+        text += ['', '![Queue intervention and reversal](queue-overview.png)', '',
+                 '[Export figure as SVG](queue-overview.svg)', '']
     if all(name in measurements for name in queue_names[:2]):
         a = statistics.mean(measurements[queue_names[0]]['metrics'][('TCP_STREAM_MULTI', 'throughput')])
         b = statistics.mean(measurements[queue_names[1]]['metrics'][('TCP_STREAM_MULTI', 'throughput')])
