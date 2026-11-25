@@ -4,6 +4,18 @@
   become: true
   gather_facts: false
   tasks:
+    - name: Inspect a previous direct bridge control service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cs740-direct-bridge.service
+      register: experiment_direct_bridge
+
+    - name: Detach the physical experiment NIC from a previous direct bridge
+      ansible.builtin.systemd_service:
+        name: cs740-direct-bridge
+        state: stopped
+        enabled: false
+      when: experiment_direct_bridge.stat.exists
+
     - name: Inspect a previous shared tunnel service
       ansible.builtin.stat:
         path: /etc/systemd/system/cs740-host-vxlan.service

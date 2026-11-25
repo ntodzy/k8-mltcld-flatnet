@@ -1,0 +1,65 @@
+---
+- name: Build a no-tunnel bridge attachment control
+  hosts: hypervisors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require this control's fixed MTU profile
+      ansible.builtin.assert:
+        that:
+          - experiment_mode == 'bridge-1450'
+          - experiment_guest_mtu | int == 1450
+          - experiment_underlay_mtu | int == 1500
+
+    - name: Reject an experiment interface carrying a default management route
+      ansible.builtin.command:
+        argv: [ip, -4, route, show, default, dev, '{{ vxlan_underlay_interface }}']
+      register: direct_bridge_default
+      changed_when: false
+
+    - name: Preserve management routing
+      ansible.builtin.assert:
+        that: direct_bridge_default.stdout | trim == ''
+
+    - name: Install the direct bridge control helper
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/cs740-direct-bridge
+        mode: '0755'
+        content: |
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          if [[ "${1:-}" == down ]]; then
+            ip link set dev {{ vxlan_underlay_interface | quote }} nomaster
+            exit 0
+          fi
+          [[ "${1:-}" == up ]] || exit 2
+          if ! ip link show dev cs740br >/dev/null 2>&1; then
+            ip link add cs740br type bridge
+          fi
+          ip link set dev {{ vxlan_underlay_interface | quote }} mtu 1500 up
+          ip link set dev {{ vxlan_underlay_interface | quote }} master cs740br
+          ip link set dev cs740br mtu 1450 up
+
+    - name: Install the persistent direct bridge control service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cs740-direct-bridge.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=CS740 direct bridge attachment control
+          After=network-online.target
+          Before=libvirtd.service
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/cs740-direct-bridge up
+          ExecStop=/usr/local/sbin/cs740-direct-bridge down
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reconcile the direct bridge control
+      ansible.builtin.systemd_service:
+        name: cs740-direct-bridge
+        state: restarted
+        enabled: true
+        daemon_reload: true

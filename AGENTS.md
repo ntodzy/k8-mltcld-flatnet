@@ -40,6 +40,10 @@ interfaces, or select an experiment.
   saved measurements into Markdown/CSV/JSON and Matplotlib SVG/PNG figures.
   Preserve phase/sample identity; do not double-count mirrored reports or
   host-wide counters repeated in per-core CSV rows. See `docs/experiments/aggregation.md`.
+- `experiments/study.py --background`: complete rerun and targeted host-VXLAN
+  queue/profile/bridge controls. Reuse its collection lock, preserve retry
+  history, and restore queue baselines. `experiments/queues.py` changes only
+  worker experiment NIC drivers and gracefully restarts those workers.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
@@ -91,6 +95,12 @@ The experiment modes are:
 | `host-vxlan` | Shared hypervisor VXLAN bridge; inner MTU 1500, underlay MTU 1550 |
 | `vm-vxlan-1450` | Per-VM Linux VXLAN; inner MTU 1450, guest/physical transport MTU 1500 |
 | `host-vxlan-1450` | Shared host VXLAN; guest/bridge/tunnel MTU 1450, physical MTU 1500 |
+
+`bridge-1450` is an extra attachment control, excluded from the default eight:
+native Cilium at Pod/guest MTU 1450, TAP/host bridge to physical LAN at MTU 1500.
+Guest diagnostics identify benchmark Pod UIDs through cgroups and inspect their
+network namespaces; host `/proc/net` counters do not cover ordinary Pod TCP.
+Host-network Pod counters still include other connections in the host namespace.
 
 Custom VXLAN uses VNI 740 and UDP 4789. Per-VM forwarding reserves
 `10.245.0.0/24`, `cs740vx`, and route protocol 242. Shared host VXLAN uses

@@ -10,7 +10,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from common import GENERATED, MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile
 
 
 def deployment_config(source, mode, config_dir):
@@ -24,7 +24,7 @@ def deployment_config(source, mode, config_dir):
             raise ValueError('Base config must use direct experiment NIC attachments; '
                              'keep bridge changes in the generated experiment config.')
         host['network']['mtu'] = mtu_profile(mode)['guest_mtu']
-        if mode in HOST_VXLAN_MODES:
+        if mode in HOST_VXLAN_MODES or mode == 'bridge-1450':
             host['network'] = {'mode': 'bridge', 'source': 'cs740br', 'mtu': mtu_profile(mode)['guest_mtu']}
     return config
 
@@ -59,7 +59,7 @@ def hypervisor_inventory(config, mode, ssh_config, subnet):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=MODES)
+    parser.add_argument('mode', choices=ALL_MODES)
     parser.add_argument('--config', type=Path, default=ROOT / 'infrastructure/config.json')
     parser.add_argument('--reset', action='store_true',
                         help='Remove Kubernetes/Cilium state and reboot all guests first; preserves disks and SSH keys')
@@ -78,7 +78,7 @@ def main():
         parser.error('host-vxlan requires at least two hypervisors')
     host_file = GENERATED / 'experiment_hypervisors.json'
     config_file = GENERATED / 'experiment_config.json'
-    cluster_mode = 'native' if args.mode == 'vm-local' else args.mode
+    cluster_mode = 'native' if args.mode == 'vm-local' else 'direct-1450' if args.mode == 'bridge-1450' else args.mode
     playbooks = ROOT / 'infrastructure/ansible/playbooks'
     commands = []
     if args.reset:
@@ -86,6 +86,8 @@ def main():
     commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'experiment-underlay.yml')])
     if args.mode in HOST_VXLAN_MODES:
         commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'host-vxlan.yml')])
+    if args.mode == 'bridge-1450':
+        commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'direct-bridge.yml')])
     commands += [
         [str(ROOT / 'infrastructure/deploy.sh'), '--config', str(config_file), '--auto-approve', 'apply'],
         ['ansible-playbook', '-i', str(inventory), '-i', str(host_file), str(playbooks / 'experiment-guests.yml')],

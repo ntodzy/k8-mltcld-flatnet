@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run pinned Cilium CLI performance tests through the existing controller SSH alias."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ import subprocess
 import tarfile
 import uuid
 
-from common import GENERATED, MODES, ROOT, VM_VXLAN_MODES, guests, remote, save_json, ssh_command, mtu_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, VM_VXLAN_MODES, guests, remote, save_json, ssh_command, mtu_profile
 
 KUBECTL = ['sudo', '-n', 'kubectl', '--kubeconfig=/etc/kubernetes/admin.conf']
 CILIUM = ['sudo', '-n', '/usr/local/bin/cilium', '--kubeconfig=/etc/kubernetes/admin.conf']
@@ -62,6 +63,14 @@ def cpu_utilization(before, after):
     return round(100 * (total - idle) / total, 3) if total > 0 else None
 
 
+def machine_snapshot(config, target):
+    script = '''import json, pathlib, subprocess
+print(json.dumps({"cpu": pathlib.Path("/proc/stat").read_text(),
+ "links": subprocess.check_output(["ip", "-j", "-d", "link", "show"], text=True),
+ "routes": subprocess.check_output(["ip", "-j", "-4", "route", "show"], text=True)}))'''
+    return json.loads(remote(config, target, ['python3', '-c', script]))
+
+
 def unpack_reports(archive, destination):
     """Copy regular JSON files only; never extract links or arbitrary tar paths."""
     count = 0
@@ -90,7 +99,7 @@ def positive(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=MODES)
+    parser.add_argument('mode', choices=ALL_MODES)
     parser.add_argument('--client', required=True)
     parser.add_argument('--server', required=True)
     parser.add_argument('--duration', type=positive, default=30, help='Seconds per test/sample (default: 30)')
@@ -177,10 +186,12 @@ def main():
         for name in (args.client, args.server):
             host = hosts[name]['hypervisor']
             targets['hypervisor-' + host] = 'cs740-' + host + '-jump'
-        for label, target in targets.items():
-            before[label] = cpu_counts(remote(ssh_config, target, ['cat', '/proc/stat']))
-            (output / f'{label}-links.json').write_text(remote(ssh_config, target, ['ip', '-j', '-d', 'link', 'show']))
-            (output / f'{label}-routes.json').write_text(remote(ssh_config, target, ['ip', '-j', '-4', 'route', 'show']))
+        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+            snapshots = list(pool.map(lambda item: (item[0], machine_snapshot(ssh_config, item[1])), targets.items()))
+        for label, snapshot in snapshots:
+            before[label] = cpu_counts(snapshot['cpu'])
+            (output / f'{label}-links.json').write_text(snapshot['links'])
+            (output / f'{label}-routes.json').write_text(snapshot['routes'])
         remote_dir = remote(ssh_config, controller, ['mktemp', '-d', '/tmp/cs740-perf.XXXXXXXX']).strip()
         metadata['remote_report_directory'] = remote_dir
         if not re.fullmatch(r'/tmp/cs740-perf\.[A-Za-z0-9]+', remote_dir):
@@ -232,6 +243,14 @@ def main():
         raise
     finally:
         # Remove only this invocation's namespace, never cilium-test or another run.
+        # Completed netperf workloads have no persistent state; shorten their
+        # termination grace instead of spending 30 seconds per diagnostic phase.
+        try:
+            remote(ssh_config, controller, KUBECTL + [
+                '-n', namespace + '-1', 'delete', 'pods', '--all', '--ignore-not-found',
+                '--grace-period=1', '--wait=false'])
+        except (OSError, subprocess.CalledProcessError) as error:
+            metadata.setdefault('cleanup_errors', []).append(str(error))
         try:
             remote(ssh_config, controller, KUBECTL + [
                 'delete', 'namespace', namespace + '-1', '--ignore-not-found', '--wait=true', '--timeout=120s'])

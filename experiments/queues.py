@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 import fcntl
 import json
 from pathlib import Path
+import re
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 
 from common import GENERATED, ROOT, guests, remote, save_json
 
@@ -25,16 +27,26 @@ def configure(vms, queues=None, restore=False, output=None):
         records.append(json.loads(remote(config, 'cs740-' + hosts[vm]['hypervisor'] + '-jump',
                        ['sudo', '-n', 'python3', '-c', agent, vm, settings[vm]['mac_address'],
                         'restore' if restore else str(queues)])))
+        interface = next(entry for entry in ET.fromstring(records[-1]['after_xml']).findall('./devices/interface')
+                         if entry.find('mac').get('address', '').lower() == settings[vm]['mac_address'].lower())
+        driver = interface.find('driver')
+        expected = int(driver.get('queues', '1')) if driver is not None else 1
         deadline = time.monotonic() + 300
         while True:
             try:
                 channels = remote(config, vm, ['sudo', '-n', 'ethtool', '-l', 'experiment'])
                 records[-1]['guest_channels'] = channels
-                if not restore:
-                    current = channels.split('Current hardware settings:')[-1]
-                    if f'Combined:\t{queues}' not in current and f'Combined:\t\t{queues}' not in current:
-                        remote(config, vm, ['sudo', '-n', 'ethtool', '-L', 'experiment', 'combined', str(queues)])
-                        records[-1]['guest_channels'] = remote(config, vm, ['sudo', '-n', 'ethtool', '-l', 'experiment'])
+                current = channels.split('Current hardware settings:')[-1]
+                match = re.search(r'Combined:\s*(\d+)', current)
+                if match is None:
+                    raise RuntimeError(f'{vm} did not report a combined queue count')
+                if int(match[1]) != expected:
+                    remote(config, vm, ['sudo', '-n', 'ethtool', '-L', 'experiment', 'combined', str(expected)])
+                    channels = remote(config, vm, ['sudo', '-n', 'ethtool', '-l', 'experiment'])
+                    records[-1]['guest_channels'] = channels
+                    match = re.search(r'Combined:\s*(\d+)', channels.split('Current hardware settings:')[-1])
+                    if match is None or int(match[1]) != expected:
+                        raise RuntimeError(f'{vm} queue count did not converge to {expected}')
                 break
             except (OSError, subprocess.CalledProcessError):
                 if time.monotonic() >= deadline:

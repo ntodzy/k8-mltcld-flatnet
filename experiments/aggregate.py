@@ -111,6 +111,35 @@ def diagnostic_rows(path, context, warnings):
                 if finite(value):
                     rows.append(row(base, domain='cpu', core=core, metric=metric, unit='%',
                                     scope='observed_workload', value=value))
+        for pod in data.get('pod_tcp', {}).values():
+            pod_scope = 'host_network_namespace' if pod.get('host_network') else 'benchmark_pod_namespace'
+            for field, metrics in [('snmp_delta', ('Tcp:RetransSegs', 'Tcp:OutSegs', 'Tcp:InSegs')),
+                                   ('netstat_delta', ('TcpExt:TCPTimeouts', 'TcpExt:TCPFastRetrans', 'TcpExt:TCPLossProbes'))]:
+                for metric in metrics:
+                    value = pod.get(field, {}).get(metric)
+                    if finite(value):
+                        rows.append(row(base, domain='pod-tcp', metric=metric, unit='count',
+                                        scope=pod_scope, value=value))
+            for metric in ('cwnd', 'rtt_ms', 'data_cwnd', 'data_rtt_ms', 'data_minrtt_ms', 'data_rwnd_limited_percent'):
+                for stat, value in pod.get(metric, {}).items():
+                    if finite(value):
+                        rows.append(row(base, domain='pod-tcp', metric=f'{metric}/{stat}',
+                                        unit='segments' if metric in ('cwnd', 'data_cwnd') else '%' if metric.endswith('_percent') else 'ms',
+                                        scope=pod_scope, value=value))
+        for task in data.get('threads', []):
+            for metric, unit in [('cpu_percent_one_core', '% of one CPU'), ('scheduler_wait_ms', 'ms')]:
+                value = task.get(metric)
+                if finite(value):
+                    rows.append(row(base, domain='thread', core=f'{task["comm"]}:{task["tid"]}',
+                                    interface=task.get('domain') or '', metric=metric, unit=unit,
+                                    scope='observed_workload', value=value))
+        for interface, directions in data.get('interface_counter_delta', {}).items():
+            for direction, metrics in directions.items():
+                for metric, value in metrics.items():
+                    if finite(value):
+                        rows.append(row(base, domain='interface', interface=interface, metric=f'{direction}/{metric}',
+                                        unit='bytes' if metric == 'bytes' else 'count',
+                                        scope='whole_invocation', value=value))
         busy = [values['busy_percent'] for core, values in data.get('per_core', {}).items()
                 if core != 'cpu' and finite(values.get('busy_percent'))]
         if busy:
@@ -362,6 +391,21 @@ def write_report(output, inputs, stats, warnings, figures):
                  'These are counts, not rates. NIC/queue counters in aggregate.csv cover the whole invocation, including setup and cleanup.', '',
                  table(['Attempt', 'Target', 'Network', 'Test', 'Counter', 'n', 'Mean count', 'SD', 'Max'],
                        [[r[k] for k in ('attempt', 'target', 'network', 'test', 'metric', 'n', 'mean', 'stdev', 'max')] for r in counters])]
+    pod_tcp = [r for r in stats if r['domain'] == 'pod-tcp']
+    if pod_tcp:
+        text += ['', '## Benchmark Pod TCP diagnostics', '',
+                 'Counters come from the identified benchmark Pod network namespaces. Socket cwnd/RTT summaries include observed sockets in that Pod; '
+                 'they are not transaction latency and are not weighted by bytes. Older host-namespace TCP counters do not establish benchmark retransmissions.', '',
+                 table(['Attempt', 'Target', 'Test', 'Metric', 'Unit', 'n', 'Mean', 'SD', 'Max'],
+                       [[r[k] for k in ('attempt', 'target', 'test', 'metric', 'unit', 'n', 'mean', 'stdev', 'max')] for r in pod_tcp])]
+    threads = [r for r in stats if r['domain'] == 'thread' and r['metric'] == 'cpu_percent_one_core']
+    if threads:
+        top = sorted(threads, key=lambda r: -r['mean'])[:40]
+        text += ['', '## Busiest observed threads', '',
+                 'Thread CPU is normalized to one CPU, separately from machine-wide averages. QEMU vCPU threads include guest execution; '
+                 'do not add them to guest CPU measurements. All thread and scheduler-wait statistics are in aggregate.csv.', '',
+                 table(['Attempt', 'Target', 'Test', 'Thread', 'VM domain', 'n', 'Mean % of one CPU', 'Max'],
+                       [[r[k] for k in ('attempt', 'target', 'test', 'core', 'interface', 'n', 'mean', 'max')] for r in top])]
     if figures:
         text += ['', '## Figures', '']
         for title, path in figures:

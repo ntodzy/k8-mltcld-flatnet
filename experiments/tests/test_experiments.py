@@ -122,6 +122,8 @@ class RunnerTests(unittest.TestCase):
                                    for name in HOSTS]}
 
                 def remote(_config, _host, argv):
+                    if argv[:2] == ['python3', '-c']:
+                        return json.dumps({'cpu': 'cpu 100 0 0 900 0 0 0 0 0 0\n', 'links': '[]', 'routes': '[]'})
                     if 'nodes' in argv:
                         return json.dumps(nodes)
                     if 'configmap' in argv:

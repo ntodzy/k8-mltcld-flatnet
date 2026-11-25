@@ -5,6 +5,7 @@ One JSON object per line. stdin EOF or any input requests shutdown. Optional
 perf writes only to this invocation's temporary directory, removed on exit.
 """
 import base64
+from collections import Counter
 from datetime import datetime, timezone
 import json
 import os
@@ -63,11 +64,20 @@ def process_observations():
                     sched = [int(v) for v in (task / 'schedstat').read_text().split()]
                     tasks.append({'pid': int(entry.name), 'tid': int(task.name), **stat,
                                   'run_ns': sched[0], 'wait_ns': sched[1],
-                                  'cmdline': cmdline, 'pod_uid': pod['uid'] if pod else None})
+                                  'timeslices': sched[2],
+                                  'domain': (re.search(r'guest=([^,\s]+)', cmdline).group(1)
+                                             if re.search(r'guest=([^,\s]+)', cmdline) else None),
+                                  'cmdline': cmdline if task.name == entry.name else '',
+                                  'pod_uid': pod['uid'] if pod else None})
                 except (OSError, ValueError, IndexError):
                     pass
         except (OSError, ValueError):
             pass
+    domains = {task['pid']: task['domain'] for task in tasks if task.get('domain')}
+    for task in tasks:
+        match = re.fullmatch(r'vhost-(\d+)', task['comm'])
+        if match:
+            task['domain'] = domains.get(int(match[1]))
     return netperf, list(pods.values()), tasks
 
 
@@ -81,8 +91,8 @@ def read(path):
 def command(argv):
     try:
         result = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=5)
-        return {'exit_code': result.returncode, 'output': result.stdout}
+                                stderr=subprocess.PIPE, timeout=5)
+        return {'exit_code': result.returncode, 'output': result.stdout, 'stderr': result.stderr}
     except (OSError, subprocess.TimeoutExpired) as error:
         return {'error': str(error)}
 
@@ -100,6 +110,9 @@ def snapshot():
         'links': command(['ip', '-j', '-s', '-d', 'link', 'show']),
         'routes': command(['ip', '-j', '-4', 'route', 'show']),
         'nstat': command(['nstat', '-a', '-s', '-z']),
+        'qdiscs': command(['tc', '-s', '-j', 'qdisc', 'show']),
+        'network_sysctls': command(['sysctl', 'net.core.netdev_budget', 'net.core.netdev_budget_usecs',
+                                    'net.core.netdev_max_backlog', 'net.core.rmem_max', 'net.core.wmem_max']),
         'interrupts': read('/proc/interrupts'),
         'affinity': {str(p): read(p) for p in Path('/proc/irq').glob('*/smp_affinity_list')},
         'rps': {str(p): read(p) for p in Path('/sys/class/net').glob('*/queues/rx-*/rps_cpus')},
@@ -116,6 +129,7 @@ def sample():
         'interrupts': read('/proc/interrupts'), 'netdev': read('/proc/net/dev'),
         'tcp': command(['ss', '-t', '-i', '-n', '-p']), 'netperf': netperf,
         'pods': pods, 'tasks': tasks, 'clock_ticks': os.sysconf('SC_CLK_TCK'),
+        'scheduler_stats_enabled': read('/proc/sys/kernel/sched_schedstats'),
     }
 
 
@@ -124,12 +138,36 @@ def emit(kind, payload):
                       'monotonic_seconds': time.monotonic(), **payload}), flush=True)
 
 
+def drop_report(path):
+    reasons, locations = Counter(), Counter()
+    examples, messages = [], []
+    with subprocess.Popen(['perf', 'script', '-i', str(path)], text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+        for line in process.stdout:
+            if 'skb:kfree_skb:' not in line:
+                if len(messages) < 25:
+                    messages.append(line.strip())
+                continue
+            reason = re.search(r'reason:\s*(\S+)', line)
+            location = re.search(r'location=(\S+)', line)
+            reasons[reason[1] if reason else 'unknown'] += 1
+            locations[location[1] if location else 'unknown'] += 1
+            if len(examples) < 25:
+                examples.append(line.strip())
+        code = process.wait()
+    return {'exit_code': code, 'reasons': dict(reasons), 'locations': dict(locations),
+            'examples': examples, 'messages': messages,
+            'scope': 'system-wide skb frees with drop reasons during the profile; not filtered to the benchmark flow'}
+
+
 def main():
     global EXPECTED_PODS, REQUIRE_IDENTITY
     profile = '--profile' in sys.argv
     workspace = Path(tempfile.mkdtemp(prefix='cs740-diagnostics.'))
     profiler = None
     profile_log = None
+    drop_profiler = None
+    drop_log = None
     try:
         emit('before', snapshot())
         emit('ready', {'hostname': os.uname().nodename, 'profile_requested': profile})
@@ -156,6 +194,11 @@ def main():
                             stdin=subprocess.DEVNULL, stdout=profile_log, stderr=profile_log,
                             start_new_session=True)
                         emit('profile_started', {})
+                        drop_log = (workspace / 'drops.log').open('w+')
+                        drop_profiler = subprocess.Popen(
+                            ['perf', 'record', '-a', '-e', 'skb:kfree_skb', '-o', str(workspace / 'drops.data'),
+                             '--', 'sleep', str(min(duration, 15))],
+                            stdin=subprocess.DEVNULL, stdout=drop_log, stderr=drop_log, start_new_session=True)
                     except OSError as error:
                         emit('profile_error', {'error': str(error)})
                 else:
@@ -186,6 +229,23 @@ def main():
                         emit('perf_data', {'base64': base64.b64encode(chunk).decode()})
         if profile_log is not None:
             profile_log.close()
+        if drop_profiler is not None:
+            if drop_profiler.poll() is None:
+                os.killpg(drop_profiler.pid, signal.SIGINT)
+                try:
+                    drop_profiler.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    os.killpg(drop_profiler.pid, signal.SIGKILL)
+                    drop_profiler.wait()
+            drop_log.flush()
+            emit('drop_profile_result', {'exit_code': drop_profiler.returncode,
+                'log': (workspace / 'drops.log').read_text(),
+                'report': drop_report(workspace / 'drops.data') if (workspace / 'drops.data').exists() else None})
+            if (workspace / 'drops.data').exists():
+                with (workspace / 'drops.data').open('rb') as stream:
+                    while chunk := stream.read(49152):
+                        emit('drop_data', {'base64': base64.b64encode(chunk).decode()})
+            drop_log.close()
         shutil.rmtree(workspace)
 
 

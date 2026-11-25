@@ -36,19 +36,23 @@ def progress(state):
     status = state.get('status', 'unknown')
     label = 'DONE' if status in SUCCESS else status.upper()
     phase = state.get('phase', 'waiting to start')
-    text = f'{label}: {finished}/{total} measurements complete | phase: {phase}'
+    unit = 'steps' if state.get('kind') == 'extended-study' else 'measurements'
+    text = f'{label}: {finished}/{total} {unit} complete | phase: {phase}'
     if state.get('error'):
         text += ' | ' + state['error']
     return text, status
 
 
-def monitor(manifest, watch=False, interval=10, sleep=time.sleep):
+def monitor(manifest, watch=False, interval=60, sleep=time.sleep):
     print(f'Results: {manifest.parent}', flush=True)
     print(f'Log: {manifest.parent / "collection.log"}', flush=True)
+    previous = None
     while True:
         state = json.loads(manifest.read_text())
         text, status = progress(state)
-        print(text, flush=True)
+        if text != previous:
+            print(text, flush=True)
+            previous = text
         if status in SUCCESS:
             return 0
         if status not in ACTIVE:
@@ -61,9 +65,12 @@ def monitor(manifest, watch=False, interval=10, sleep=time.sleep):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, help='Select a result directory; default is the latest collection/comparison')
-    parser.add_argument('--watch', action='store_true', help='Refresh every 10 seconds and exit on completion/failure')
+    parser.add_argument('--watch', action='store_true', help='Check periodically and print only changed progress')
+    parser.add_argument('--interval', type=int, default=60, help='Seconds between watch checks (default: 60)')
     args = parser.parse_args()
-    return monitor(find_manifest(args.directory), args.watch)
+    if args.interval < 1:
+        parser.error('--interval must be positive')
+    return monitor(find_manifest(args.directory), args.watch, args.interval)
 
 
 if __name__ == '__main__':

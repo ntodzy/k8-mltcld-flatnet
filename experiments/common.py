@@ -19,8 +19,11 @@ MTU_PROFILES = {
     'host-vxlan': (1500, 1500, 1550, 1500),
     'vm-vxlan-1450': (1450, 1500, 1500, 1450),
     'host-vxlan-1450': (1450, 1450, 1500, 1450),
+    'bridge-1450': (1450, 1450, 1500, 1450),
 }
-MODES = tuple(MTU_PROFILES)
+CONTROL_MODES = ('bridge-1450',)
+ALL_MODES = tuple(MTU_PROFILES)
+MODES = tuple(mode for mode in ALL_MODES if mode not in CONTROL_MODES)
 
 
 def mtu_profile(mode):

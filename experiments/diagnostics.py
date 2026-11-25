@@ -85,6 +85,28 @@ def softirq_rows(raw):
             for index, value in enumerate(fields[1:])}
 
 
+def data_sockets(output):
+    """Separate netperf data sockets from its port-12865 control connections."""
+    result = []
+    for block in re.split(r'\n(?=\S)', output):
+        lines = block.strip().splitlines()
+        if not lines or not lines[0].startswith('ESTAB'):
+            continue
+        header = lines[0].split()
+        if len(header) < 5 or any(endpoint.endswith(':12865') for endpoint in header[3:5]):
+            continue
+        entry = {'local': header[3], 'peer': header[4]}
+        for name, pattern in [('cwnd', r'\bcwnd:(\d+)'), ('rtt_ms', r'\brtt:([\d.]+)'),
+                              ('minrtt_ms', r'\bminrtt:([\d.]+)'), ('mss', r'\bmss:(\d+)'),
+                              ('bytes_retrans', r'\bbytes_retrans:(\d+)'),
+                              ('rwnd_limited_percent', r'\brwnd_limited:[^\s(]+\(([\d.]+)%\)')]:
+            match = re.search(pattern, block)
+            if match:
+                entry[name] = float(match[1])
+        result.append(entry)
+    return result
+
+
 def summary(records, active_start=None, active_end=None):
     samples = [r for r in records if r['kind'] == 'sample']
     active = [r for r in samples if active_start is not None and
@@ -112,7 +134,7 @@ def summary(records, active_start=None, active_end=None):
             if a['netns'] != b['netns']:
                 result['warnings'].append(f'Pod {uid} changed network namespace; TCP delta omitted')
                 continue
-            entry = {key: a.get(key) for key in ('uid', 'name', 'namespace', 'node', 'host_network', 'netns')}
+            entry = {key: a.get(key) for key in ('uid', 'name', 'namespace', 'node', 'role', 'host_network', 'netns')}
             entry['observed_seconds'] = observations[-1][0]['received_epoch'] - observations[0][0]['received_epoch']
             for field in ('snmp', 'netstat'):
                 if isinstance(a.get(field), str) and isinstance(b.get(field), str):
@@ -122,6 +144,12 @@ def summary(records, active_start=None, active_end=None):
                 values = [float(value) for socket in sockets for value in re.findall(pattern, socket['output'])]
                 if values:
                     entry[label] = {'min': min(values), 'max': max(values), 'mean': sum(values) / len(values)}
+            bulk = [item for socket in sockets for item in data_sockets(socket['output'])]
+            entry['data_socket_observation_count'] = len(bulk)
+            for label in ('cwnd', 'rtt_ms', 'minrtt_ms', 'rwnd_limited_percent'):
+                values = [item[label] for item in bulk if label in item]
+                if values:
+                    entry['data_' + label] = {'min': min(values), 'max': max(values), 'mean': sum(values) / len(values)}
             result['pod_tcp'][uid] = entry
         if first.get('tasks') is not None:
             def task_key(task):
@@ -130,18 +158,37 @@ def summary(records, active_start=None, active_end=None):
             duration = result['observed_active_seconds']
             ticks = first['clock_ticks']
             result['threads'] = []
+            if str(first.get('scheduler_stats_enabled', '')).strip() == '0':
+                result['warnings'].append('Kernel scheduler statistics are disabled; scheduler wait counters may be unavailable')
             for task in last.get('tasks', []):
                 previous = initial.get(task_key(task))
                 if previous is None:
                     continue
                 used = task['utime'] + task['stime'] - previous['utime'] - previous['stime']
+                processors = [candidate['processor'] for record in active for candidate in record.get('tasks', [])
+                              if task_key(candidate) == task_key(task) and 'processor' in candidate]
                 result['threads'].append({**task, 'cpu_percent_one_core': round(100 * used / ticks / duration, 3),
-                                          'scheduler_wait_ms': (task['wait_ns'] - previous['wait_ns']) / 1e6})
+                                          'scheduler_wait_ms': (task['wait_ns'] - previous['wait_ns']) / 1e6,
+                                          'observed_cpus': sorted(set(processors)),
+                                          'sampled_cpu_changes': sum(a != b for a, b in zip(processors, processors[1:]))})
     else:
         result['warnings'].append('Too few active samples for workload CPU/counter attribution')
     snapshots = {r['kind']: r for r in records if r['kind'] in ('before', 'after')}
     if len(snapshots) == 2:
         before, after = snapshots['before'], snapshots['after']
+        result['interface_counter_delta'] = {}
+        if before.get('links', {}).get('exit_code') == after.get('links', {}).get('exit_code') == 0:
+            try:
+                links_a = {entry['ifname']: entry for entry in json.loads(before['links']['output'])}
+                links_b = {entry['ifname']: entry for entry in json.loads(after['links']['output'])}
+            except (ValueError, KeyError) as error:
+                links_a, links_b = {}, {}
+                result['warnings'].append(f'Cannot decode interface counter snapshot: {error}; raw command output retained')
+            for name in links_a.keys() & links_b.keys():
+                a = links_a[name].get('stats64', links_a[name].get('stats', {}))
+                b = links_b[name].get('stats64', links_b[name].get('stats', {}))
+                result['interface_counter_delta'][name] = {direction: counters_delta(a.get(direction, {}), b.get(direction, {}))
+                                                           for direction in ('rx', 'tx')}
         result['nic_counter_delta'] = {}
         for interface in before['interfaces'].keys() & after['interfaces'].keys():
             a, b = before['interfaces'][interface]['-S'], after['interfaces'][interface]['-S']
@@ -179,8 +226,9 @@ class Monitor:
                 for line in self.process.stdout:
                     record = json.loads(line)
                     record['received_epoch'] = time.time()
-                    if record['kind'] == 'perf_data':
-                        with (self.directory / 'perf.data').open('ab') as perf:
+                    if record['kind'] in ('perf_data', 'drop_data'):
+                        name = 'perf.data' if record['kind'] == 'perf_data' else 'drops.data'
+                        with (self.directory / name).open('ab') as perf:
                             perf.write(base64.b64decode(record['base64'], validate=True))
                         continue
                     raw.write(json.dumps(record) + '\n')
@@ -284,6 +332,7 @@ def run_diagnostics(args, hosts, ssh_config):
                                                 '-n', child['namespace'], 'get', 'pods', '-o', 'json']))
                                             pods = [{'uid': pod['metadata']['uid'], 'name': pod['metadata']['name'],
                                                      'namespace': child['namespace'], 'node': pod['spec'].get('nodeName'),
+                                                     'role': pod['metadata'].get('labels', {}).get('role'),
                                                      'host_network': pod['spec'].get('hostNetwork', False)}
                                                     for pod in payload['items'] if pod['spec'].get('nodeName')]
                                             if all(any(pod['node'] == node for pod in pods) for node in (args.client, args.server)):
