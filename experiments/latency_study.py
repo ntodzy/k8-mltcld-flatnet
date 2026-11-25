@@ -64,7 +64,7 @@ def idle_controls():
     return [dict(step, mode='host-vxlan-1450', block='idle-interaction', status='pending', attempts=[]) for step in steps]
 
 
-def environment():
+def environment(include_policy=False):
     script = '''import json,os,subprocess
 from pathlib import Path
 role=__import__('sys').argv[1]
@@ -77,12 +77,22 @@ else:
  for task in Path('/proc',str(q),'task').iterdir():
   name=(task/'comm').read_text().strip()
   if name.startswith(('CPU ','vhost-')):d['affinity'][task.name]={'comm':name,'cpus':sorted(os.sched_getaffinity(int(task.name)))}
+if len(__import__('sys').argv)>2 and __import__('sys').argv[2]=='1':
+ d['policy']={}
+ for key,path in {'cpuidle_governor':'/sys/devices/system/cpu/cpuidle/current_governor_ro',
+                  'frequency_governor':'/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor',
+                  'halt_poll_ns':'/sys/module/kvm/parameters/halt_poll_ns'}.items():
+  p=Path(path);d['policy'][key]=p.read_text().strip() if p.exists() else None
+ if role:
+  for flag in ('-c','-k'):
+   d['policy'][flag]=subprocess.check_output(['ethtool',flag,__import__('sys').argv[3]],text=True)
 print(json.dumps(d))
 '''
     def read(item):
-        label, (target, domain, _) = item
+        label, (target, domain, interface) = item
         return label, json.loads(remote(GENERATED / 'ssh_config', target,
-                            ['sudo', '-n', 'python3', '-c', script, domain or '']))
+                            ['sudo', '-n', 'python3', '-c', script, domain or '',
+                             '1' if include_policy else '0', interface]))
     with ThreadPoolExecutor(max_workers=4) as pool:
         return dict(pool.map(read, targets().items()))
 

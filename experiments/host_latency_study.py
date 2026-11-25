@@ -52,11 +52,11 @@ def execute(directory, state):
             try:
                 if step['kind'] == 'setup':
                     active = GENERATED/'active-experiment.json'
-                    reuse = (step == state['plan'][0] and active.exists()
+                    reuse = ((step == state['plan'][0] or step['name']=='restore-original-host-mode') and active.exists()
                              and json.loads(active.read_text())['mode'] == step['mode'])
                     if not reuse:
                         run_logged([sys.executable, str(ROOT/'experiments/setup.py'), step['mode'], '--reset'], work/'setup.log')
-                    state.setdefault('environments', {})[step['mode']] = environment()
+                    state.setdefault('environments', {})[step['mode']] = environment(include_policy=True)
                     attempt['reused_setup'] = reuse
                 elif step['kind'] == 'trace':
                     from analyze_latency import trace_rows, write_csv
@@ -76,7 +76,7 @@ def execute(directory, state):
                         item.update(instrumented=True,instrumentation='bounded-forwarding-trace')
                         save_json(path,item)
                 else:
-                    current = environment()
+                    current = environment(include_policy=True)
                     save_json(work/'environment.json', current)
                     if current != state['environments'][step['mode']]:
                         raise RuntimeError('Boot, kernel, queues, NIC or affinity changed within mode block')
