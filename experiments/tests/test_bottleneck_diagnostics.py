@@ -40,12 +40,25 @@ class BottleneckTests(unittest.TestCase):
         self.assertEqual(rows, [(3.0, 'swapper', 'mlx4_en_process_rx_cq'), (1.0, 'vhost-123', 'csum_partial')])
 
     def test_local_capture_requires_no_accepted_or_lost_packets(self):
-        good = {'exit_code': 0, 'log': '0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n'}
+        good = {'exit_code': 0, 'direction': 'out', 'log': '0 packets captured\n20 packets received by filter\n0 packets dropped by kernel\n'}
         self.assertTrue(diagnostics.capture_is_empty(good))
-        for label in ('packets captured', 'packets received by filter', 'packets dropped by kernel'):
+        for label in ('packets captured', 'packets dropped by kernel'):
             self.assertFalse(diagnostics.capture_is_empty({**good, 'log': good['log'].replace('0 ' + label, '1 ' + label)}))
+        self.assertFalse(diagnostics.capture_is_empty({**good, 'direction': 'inout'}))
         self.assertFalse(diagnostics.capture_is_empty({'exit_code': 0, 'log': ''}))
         self.assertFalse(diagnostics.capture_is_empty(None))
+
+    def test_local_validation_requires_bridge_attachments_and_small_physical_byte_delta(self):
+        xml = '<domain><devices><interface type="direct"><mac address="aa:bb"/><source dev="enoX" mode="bridge"/></interface></devices></domain>'
+        before = {'kind': 'before', 'domain_xml': {'worker-2': {'output': xml}},
+                  'interfaces': {'enoX': {'-S': {'exit_code': 0, 'output': '  tx_bytes_phy: 100\n'}}}}
+        after = {'kind': 'after', 'interfaces': {'enoX': {'-S': {'exit_code': 0, 'output': '  tx_bytes_phy: 200\n'}}}}
+        result = diagnostics.local_link_evidence([before, after], 'enoX', {'worker-2': 'aa:bb'}, 100000)
+        self.assertTrue(result['physical_tx_below_one_percent'])
+        self.assertEqual(result['physical_tx_bytes'], 100)
+        self.assertFalse(diagnostics.local_link_evidence([before, after], 'enoX', {'worker-2': 'aa:bb'}, 1000)['physical_tx_below_one_percent'])
+        with self.assertRaises(ValueError):
+            diagnostics.local_link_evidence([before, after], 'wrong-parent', {'worker-2': 'aa:bb'}, 100000)
 
     def test_efficiency_uses_physical_host_cpu_without_adding_guest_cpu_again(self):
         phase = {'test_type': 'multi', 'directory': 'phase'}

@@ -7,9 +7,19 @@ use five 30-second samples, four streams, Pod traffic across worker-1/worker-2;
 the local mode uses host traffic across worker-2/worker-3. All modes retain the
 existing Cilium baseline and host offload configuration.
 Before its quantitative samples, the local mode performs a separate 5-second
-multistream validation with a physical-NIC TCP capture filtered to the two VM
-experiment IPs. It checks the actual host-network Pod addresses, requires zero
-matching packets and zero capture drops, and saves the pcap and validation JSON.
+multistream validation with an egress-only physical-NIC TCP capture filtered to
+the two VM experiment IPs. It checks the actual host-network Pod addresses and
+live same-parent macvtap bridge attachments, requires zero captured egress packets
+and zero capture drops, and saves the pcap and validation JSON. NIC transmit-byte
+counters must remain below 1% of the estimated application bytes; these counters
+also include unrelated traffic over the entire invocation. This bound supports
+the path check and does not claim exactly zero background wire traffic.
+An ordinary bidirectional capture is insufficient: Linux deliberately passes
+locally forwarded macvtap frames to the lower device's packet taps before local
+delivery, so tcpdump can see them without NIC transmission. See
+[`macvlan_queue_xmit` in Linux 6.8](https://github.com/torvalds/linux/blob/v6.8/drivers/net/macvlan.c#L497).
+The libpcap received-by-filter counter is retained but can precede directional
+filtering; captured egress and kernel-drop counts determine capture validity.
 That validation run is excluded from the five-sample performance averages.
 
 ## Running and watching

@@ -205,7 +205,10 @@ def main():
                     if settings.get('capture') and capture is None:
                         spec = settings['capture']
                         capture_log = (workspace / 'capture.log').open('w+')
-                        capture = subprocess.Popen(['tcpdump', '-n', '-U', '-i', spec['interface'],
+                        direction = spec.get('direction', 'inout')
+                        if direction not in ('in', 'out', 'inout'):
+                            raise ValueError('Unsupported capture direction')
+                        capture = subprocess.Popen(['tcpdump', '-n', '-U', '-Q', direction, '-i', spec['interface'],
                             '-s', '128', '-w', str(workspace / 'capture.pcap'), spec['filter']],
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=capture_log,
                             start_new_session=True)
@@ -284,7 +287,8 @@ def main():
                 os.killpg(capture.pid, signal.SIGINT)
                 capture.wait(timeout=15)
             capture_log.flush()
-            emit('capture_result', {'exit_code': capture.returncode, 'log': (workspace / 'capture.log').read_text()})
+            emit('capture_result', {'exit_code': capture.returncode, 'direction': direction,
+                                   'log': (workspace / 'capture.log').read_text()})
             if (workspace / 'capture.pcap').exists():
                 with (workspace / 'capture.pcap').open('rb') as stream:
                     while chunk := stream.read(49152):

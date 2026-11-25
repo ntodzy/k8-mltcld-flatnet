@@ -2,6 +2,19 @@
 
 ## Active overnight work (November 24–25)
 
+Latest update (06:30 UTC): native and direct-1450 baselines passed. Native
+multi 8.858 ±0.287 Gb/s; direct-1450 8.312 ±0.583. Native RR sample means
+236.63,317.75,635.75,788.77,181.15 µs show substantial run-to-run variation.
+The first VM-local attempt stopped on a validation error before its main samples:
+ordinary tcpdump sees local macvtap traffic at the physical lower device's taps.
+Linux `macvlan_queue_xmit` explicitly forwards locally through those taps.
+Hardware physical TX increased only 201516 bytes across the invocation while
+the 5-second application run transferred roughly 15 GB (23.948 Gb/s). The corrected
+validation uses egress-only capture, checks live same-parent bridge-mode MACs,
+and compares hardware TX bytes against application bytes (<1% including background).
+It preserves the failed attempt and will resume VM-local in a new attempt.
+Local Git checkpoints now include `ab8b3ec` (affinity) and `07889a7` (compact figures).
+
 The user explicitly authorized remote changes, cluster resets, all eight mode
 reruns, host/Pod diagnostics, queue and attachment controls, and a final analysis
 report. They excluded contention/multi-VM scaling and Cilium/Hubble tuning.

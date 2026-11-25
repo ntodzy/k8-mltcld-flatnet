@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import xml.etree.ElementTree as ET
 
 from common import ROOT, save_json, ssh_command, remote
 
@@ -268,13 +269,44 @@ class Monitor:
 
 
 def capture_is_empty(result):
-    if result is None or result.get('exit_code') != 0:
+    if result is None or result.get('exit_code') != 0 or result.get('direction') != 'out':
         return False
-    for label in ('packets captured', 'packets received by filter', 'packets dropped by kernel'):
+    # libpcap's received counter may include frames before direction filtering.
+    for label in ('packets captured', 'packets dropped by kernel'):
         match = re.search(r'(\d+) ' + label, result.get('log', ''))
         if match is None or int(match[1]) != 0:
             return False
     return True
+
+
+def local_link_evidence(records, interface, expected_macs, application_bytes):
+    """Distinguish local macvtap capture visibility from physical NIC transmission."""
+    before = next(record for record in records if record['kind'] == 'before')
+    after = next(record for record in records if record['kind'] == 'after')
+    for domain, mac in expected_macs.items():
+        xml = before.get('domain_xml', {}).get(domain, {})
+        root = ET.fromstring(xml.get('output', ''))
+        matches = [nic for nic in root.findall('devices/interface')
+                   if nic.find('mac') is not None and nic.find('mac').get('address', '').lower() == mac.lower()]
+        if len(matches) != 1 or matches[0].get('type') != 'direct' or matches[0].find('source') is None:
+            raise ValueError('Local path requires the expected direct experiment attachment')
+        source = matches[0].find('source')
+        if source.get('dev') != interface or source.get('mode') != 'bridge':
+            raise ValueError('Local endpoints must use macvtap bridge mode on the same lower device')
+    def counters(record):
+        stats = record['interfaces'][interface]['-S']
+        if stats['exit_code']:
+            raise ValueError('Physical NIC counter coverage is required for local-path validation')
+        return {key: int(value) for key, value in re.findall(r'^\s+(\S+):\s*(\d+)\s*$', stats['output'], re.M)}
+    a, b = counters(before), counters(after)
+    name = 'tx_bytes_phy' if 'tx_bytes_phy' in a and 'tx_bytes_phy' in b else 'tx_bytes'
+    delta = b[name] - a[name]
+    if application_bytes <= 0 or delta < 0:
+        raise ValueError('Invalid local-path byte accounting')
+    return {'verified_macvtap_bridge_domains': sorted(expected_macs), 'physical_tx_counter': name,
+            'physical_tx_bytes': delta, 'estimated_application_bytes': application_bytes,
+            'physical_tx_fraction_of_application': delta / application_bytes,
+            'physical_tx_below_one_percent': delta < application_bytes * .01}
 
 
 def verify_local_path(args, hosts, ssh_config, output):
@@ -289,7 +321,8 @@ def verify_local_path(args, hosts, ssh_config, output):
     try:
         if not monitor.ready.wait(120):
             raise RuntimeError('Local-path capture monitor did not become ready')
-        monitor.control(json.dumps({'capture': {'interface': interface, 'filter': f'tcp and host {ips[0]} and host {ips[1]}'}}))
+        monitor.control(json.dumps({'capture': {'interface': interface, 'direction': 'out',
+                                              'filter': f'tcp and host {ips[0]} and host {ips[1]}'}}))
         deadline = time.monotonic() + 20
         while not any(record['kind'] == 'capture_started' for record in monitor.records):
             if monitor.error or monitor.process.poll() is not None or time.monotonic() > deadline:
@@ -309,12 +342,21 @@ def verify_local_path(args, hosts, ssh_config, output):
     if ({pod['spec']['nodeName'] for pod in pods} != set(expected) or
             any(not pod['spec'].get('hostNetwork') or pod['status'].get('podIP') != expected.get(pod['spec']['nodeName']) for pod in pods)):
         raise RuntimeError('Local-path capture filter did not match the actual benchmark host IPs')
-    passed = capture_is_empty(result)
+    rates = [value for report in (directory / 'measurement/reports').glob('*.json')
+             for item in json.loads(report.read_text())['dataItems'] for key, value in item['data'].items()
+             if key == 'TCP_STREAM_MULTI_host-to-host_throughput' and item['unit'] == 'Mb/s']
+    if len(rates) != 1:
+        raise RuntimeError('Local-path validation requires one multistream throughput report')
+    # Include unrelated background traffic in the whole-invocation NIC counter.
+    configured_macs = {vm['name']: vm['mac_address'] for host in config['hypervisors'] for vm in host['vms']}
+    evidence = local_link_evidence(monitor.records, interface,
+                {name: configured_macs[name] for name in (args.client, args.server)}, rates[0] * 1e6 / 8 * 5)
+    passed = capture_is_empty(result) and evidence['physical_tx_below_one_percent']
     save_json(directory / 'validation.json', {'status': 'passed' if passed else 'failed',
-              'interface': interface, 'endpoint_ips': ips, 'capture': result,
-              'scope': 'TCP unicast between the benchmark VM experiment IPs during a separate 5-second multistream run'})
+              'interface': interface, 'endpoint_ips': ips, 'capture': result, 'link_evidence': evidence,
+              'scope': 'Egress-only TCP capture plus live macvtap bridge attachments and whole-invocation physical TX byte counters; background traffic is included'})
     if not passed:
-        raise RuntimeError('Local VM TCP appeared on the physical NIC or the capture lost packets; see validation.json')
+        raise RuntimeError('Local VM TCP egress/capture or physical TX byte validation failed; see validation.json')
 
 
 def run_diagnostics(args, hosts, ssh_config):
