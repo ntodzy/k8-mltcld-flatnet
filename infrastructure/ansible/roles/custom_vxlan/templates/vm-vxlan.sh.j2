@@ -13,6 +13,9 @@ modprobe vxlan
 ip -4 route flush proto 242
 if ip link show dev cs740vx >/dev/null 2>&1; then ip link delete cs740vx; fi
 ip link add cs740vx type vxlan id 740 local {{ kubernetes_node_ip | quote }} dev experiment dstport 4789 nolearning
+# Finish default .link processing before applying the MAC used by static peers.
+# Otherwise udev can replace it with a persistent MAC later during guest boot.
+udevadm settle --timeout=30
 ip link set dev cs740vx address 02:74:00:00:00:{{ '%02x' | format(local_index) }} mtu {{ cilium_inner_mtu }} up
 ip address add 10.245.0.{{ local_index }}/24 dev cs740vx
 sysctl -qw net.ipv4.conf.cs740vx.rp_filter=2

@@ -20,6 +20,16 @@ HOSTS = json.loads((ROOT / 'infrastructure/kubernetes/inventory.example.json').r
 BASE = json.loads((ROOT / 'infrastructure/config.example.json').read_text())
 
 
+class TunnelPreflightTests(unittest.TestCase):
+    def test_reboot_changed_mac_is_rejected_before_benchmark(self):
+        names = {'control-1': {}, 'worker-1': {}, 'worker-2': {}, 'worker-3': {}}
+        link = {'ifname': 'cs740vx', 'address': '02:74:00:00:00:02', 'mtu': 1450, 'flags': ['UP']}
+        runner.validate_vm_tunnel({'links': json.dumps([link])}, 'worker-1', names, 'vm-vxlan-1450')
+        link['address'] = 'c2:7f:d7:56:85:c5'
+        with self.assertRaisesRegex(ValueError, 'static peer MAC'):
+            runner.validate_vm_tunnel({'links': json.dumps([link])}, 'worker-1', names, 'vm-vxlan-1450')
+
+
 def make_archive(path, name='summary.json', content=b'{"throughput": 1000}'):
     with tarfile.open(path, 'w:gz') as archive:
         member = tarfile.TarInfo(name)

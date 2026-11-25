@@ -71,6 +71,20 @@ print(json.dumps({"cpu": pathlib.Path("/proc/stat").read_text(),
     return json.loads(remote(config, target, ['python3', '-c', script]))
 
 
+def validate_vm_tunnel(snapshot, name, hosts, mode):
+    if mode not in VM_VXLAN_MODES:
+        return
+    expected_mac = f'02:74:00:00:00:{sorted(hosts).index(name) + 1:02x}'
+    links = [link for link in json.loads(snapshot['links']) if link['ifname'] == 'cs740vx']
+    if len(links) != 1:
+        raise ValueError(f'{name}: custom VM tunnel cs740vx is missing')
+    link = links[0]
+    if link.get('address', '').lower() != expected_mac:
+        raise ValueError(f'{name}: cs740vx MAC {link.get("address")} differs from static peer MAC {expected_mac}; repair/restart cs740-vxlan before measuring')
+    if link.get('mtu') != mtu_profile(mode)['inner_mtu'] or 'UP' not in link.get('flags', []):
+        raise ValueError(f'{name}: custom VM tunnel MTU/state does not match the experiment')
+
+
 def unpack_reports(archive, destination):
     """Copy regular JSON files only; never extract links or arbitrary tar paths."""
     count = 0
@@ -192,6 +206,8 @@ def main():
             before[label] = cpu_counts(snapshot['cpu'])
             (output / f'{label}-links.json').write_text(snapshot['links'])
             (output / f'{label}-routes.json').write_text(snapshot['routes'])
+            if label in (args.client, args.server):
+                validate_vm_tunnel(snapshot, label, hosts, args.mode)
         remote_dir = remote(ssh_config, controller, ['mktemp', '-d', '/tmp/cs740-perf.XXXXXXXX']).strip()
         metadata['remote_report_directory'] = remote_dir
         if not re.fullmatch(r'/tmp/cs740-perf\.[A-Za-z0-9]+', remote_dir):
