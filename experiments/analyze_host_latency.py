@@ -8,7 +8,13 @@ from pathlib import Path
 import statistics
 
 import aggregate
-from common import save_json
+from common import ROOT, save_json
+
+
+def study_identity(directory):
+    directory=directory.resolve()
+    results=ROOT/'results'
+    return str(directory.relative_to(results)) if directory.is_relative_to(results) else str(directory)
 
 
 def load(directory, partial=False):
@@ -29,7 +35,7 @@ def load(directory, partial=False):
         summary=json.loads((work/'measurement'/phases[0]['directory']/'summary.json').read_text())
         busy_cores=sum(v['busy_core_seconds']/v['observed_active_seconds']
                        for k,v in summary.items() if k.startswith('hypervisor-'))
-        row=dict(study=directory.name,mode=step['mode'],workload=step['workload'],pair=step['pair'],
+        row=dict(study=study_identity(directory),mode=step['mode'],workload=step['workload'],pair=step['pair'],
                  policy='default' if step['cpu_latency_us']==-1 else '10us',
                  duration=state['duration'],mean_us=values.get('mean'),p50_us=values.get('p50'),
                  p90_us=values.get('p90'),p99_us=values.get('p99'),
@@ -103,10 +109,13 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--partial',action='store_true')
     args=parser.parse_args()
+    inputs=[p.resolve() for p in args.directories]
+    if len(set(inputs))!=len(inputs):
+        parser.error('Each study directory may be supplied only once')
     args.output.mkdir(parents=True,exist_ok=False)
     rows=[];states=[]
-    for directory in args.directories:
-        state,items=load(directory.resolve(),args.partial);rows.extend(items);states.append(state)
+    for directory in inputs:
+        state,items=load(directory,args.partial);rows.extend(items);states.append(state)
     stats=summarize(rows);differences=paired(rows)
     save_json(args.output/'observations.json',rows);save_json(args.output/'summary.json',stats)
     save_json(args.output/'paired.json',differences)
@@ -150,18 +159,28 @@ def main():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    study_labels={name:'S'+str(i+1) for i,name in enumerate(dict.fromkeys(r['study'] for r in rows))}
+    names={'host-vxlan-1450':'Host VXLAN · original forwarding',
+           'host-vxlan-routing-legacy-1450':'Host VXLAN · legacy VM forwarding',
+           'host-vxlan-routing-bpf-1450':'Host VXLAN · BPF VM forwarding',
+           'vm-vxlan-bpf-1450':'Guest VXLAN · BPF VM forwarding',
+           'vxlan':'Cilium VXLAN'}
+    lines+=['','Figure study labels: '+ '; '.join(label+' = '+name for name,label in study_labels.items())+'.']
     for workload,metric,ylabel in [('rr','mean_us','Mean transaction latency (µs)'),('rr','p99_us','Per-invocation P99 (µs)'),
                                    ('single','throughput','Single-stream throughput (Gb/s)'),('multi','throughput','Four-stream throughput (Gb/s)')]:
         selected=[r for r in stats if r['workload']==workload]
         if not selected:continue
-        fig,ax=plt.subplots(figsize=(max(9,len(selected)*1.1),5))
+        fig,ax=plt.subplots(figsize=(11,max(4,len(selected)*.62)))
         scale=.001 if metric=='throughput' else 1
-        for x,entry in enumerate(selected):
+        for y,entry in enumerate(selected):
             values=[r[metric]*scale for r in rows if all(r[k]==entry[k] for k in ('study','mode','workload','policy','duration'))]
-            ax.errorbar(x,entry[metric]*scale,yerr=entry[metric+'_sd']*scale,fmt='o',capsize=4,color='#147d92' if entry['policy']=='10us' else '#606060')
-            ax.scatter([x+(i-(len(values)-1)/2)*.035 for i in range(len(values))],values,s=14,alpha=.6)
-        ax.set_xticks(range(len(selected)),[r['mode']+'\n'+r['policy']+'\n'+r['study'].removeprefix('host-latency-') for r in selected],rotation=30,ha='right',fontsize=8)
-        ax.set_ylabel(ylabel);ax.set_ylim(bottom=0);ax.grid(axis='y',alpha=.2)
+            color='#147d92' if entry['policy']=='10us' else '#606060'
+            ax.errorbar(entry[metric]*scale,y,xerr=entry[metric+'_sd']*scale,fmt='o',capsize=4,color=color)
+            ax.scatter(values,[y+(i-(len(values)-1)/2)*.035 for i in range(len(values))],s=14,alpha=.6,color=color)
+        ax.set_yticks(range(len(selected)),[names.get(r['mode'],r['mode'])+'\n'+
+            r['policy']+' idle | '+str(r['duration'])+' s | n='+str(r['n'])+' | '+study_labels[r['study']] for r in selected],fontsize=8)
+        ax.invert_yaxis();ax.set_xlabel(ylabel);ax.set_xlim(left=0);ax.grid(axis='x',alpha=.2)
+        ax.set_title('Dots: individual runs · large point/error bar: mean ± sample SD',fontsize=10)
         fig.tight_layout();name=f'{workload}-{metric}'
         for extension in ('svg','png'):fig.savefig(args.output/f'{name}.{extension}',dpi=160)
         plt.close(fig);lines+=['',f'![{ylabel}]({name}.svg)']

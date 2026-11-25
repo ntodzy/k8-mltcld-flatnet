@@ -4,7 +4,8 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from host_latency_study import plan
-from analyze_host_latency import paired, summarize
+from analyze_host_latency import paired, summarize, study_identity
+from common import ROOT
 
 
 class HostLatencyStudyTests(unittest.TestCase):
@@ -46,6 +47,12 @@ class HostLatencyStudyTests(unittest.TestCase):
         self.assertEqual(len(measured),20)
         self.assertEqual({s['cpu_latency_us'] for s in measured},{-1})
         self.assertEqual({s['pair'] for s in measured},set(range(1,6)))
+
+    def test_nested_studies_with_same_basename_keep_distinct_identities(self):
+        a=study_identity(ROOT/'results'/'first'/'throughput')
+        b=study_identity(ROOT/'results'/'second'/'throughput')
+        self.assertNotEqual(a,b)
+        self.assertEqual(a,'first/throughput')
 
 
 if __name__=='__main__':unittest.main()

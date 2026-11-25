@@ -129,6 +129,17 @@ coalescing control could test interrupt batching independently if needed. These
 configuration values do not directly establish how long an individual packet
 waited, and TX completion interrupt moderation is not a packet transmit timer.
 
+There is a reason to rank a blind coalescing change below the demonstrated
+forwarding/idle interventions. In the upstream 6.8 mlx4_en driver, adaptive
+moderation selects the low timer for low-rate or small-packet traffic. Our
+configured low timer is 0 µs. This suggests that setting the ordinary 16 µs field
+to zero may not change the effective TCP_RR receive timer at all. That is an
+inference from the upstream driver and saved settings, not a measurement of each
+hardware completion queue's runtime timer; vendor patches or a different traffic
+mix could change the result. See
+[the adaptive moderation implementation](https://github.com/torvalds/linux/blob/v6.8/drivers/net/ethernet/mellanox/mlx4/en_netdev.c#L1360)
+and [the configuration exported by ethtool](https://github.com/torvalds/linux/blob/v6.8/drivers/net/ethernet/mellanox/mlx4/en_ethtool.c#L933).
+
 Reproduction and analysis commands are in
 [the experiment guide](experiments/host-latency-optimization.md). The larger
 custom-guest and Cilium comparisons are still running. The host optimization
