@@ -17,6 +17,46 @@ parsing: Ubuntu iproute2 emits a fan-map message on stderr, which had been merge
 into JSON. Capture now separates stdout/stderr and parsing errors become explicit
 coverage warnings. Attempt 2 is running; preserve all old artifacts.
 
+Update: host baseline attempt 2 and the separate CPU/drop profile have passed;
+the study has configured and verified two queues on both worker experiment NICs
+and is measuring `host-1450-two-queues`. Initial baseline multistream mean is
+4.013 ± 0.130 Gb/s, sender vhost 83.821 ± 1.958% of one CPU, sender Pod retrans
+0.848 ± 0.544 per 1000 TCP OutSegs. Physical host CPU cost proxy is about
+11.933 CPU-s/application-GB. These are not the old host-namespace counters.
+Two receiver-host TAP tx/drop deltas were nonzero (22 and 439) in whole-invocation
+windows. Avoid asserting exact flow attribution or packet/segment equivalence.
+
+The profile succeeded on all four targets. Host sender flat self symbols include
+memory copies, checksum work, DMA/IOMMU mapping and cache flushes. Most aggregate
+CPU samples are idle, so inclusive child percentages are misleading; sort by
+self overhead and inspect worker vhost threads. Receiver host skb-free trace
+has about 204k NOT_SPECIFIED frees at skb_release_data. Linux consume/free paths
+can free fragment lists this way, so these are NOT 204k lost benchmark packets.
+Raw profile data is saved, including CPU perf.data and drops.data.
+
+`experiments/analyze_study.py DIR --output NEWDIR` produces the combined report
+and five comparison groups with SVG/PNG figures and evidence.json; `--partial`
+labels interim output. An interim report exists at the study's `analysis-interim-1/`.
+It includes only the completed baseline. Main report still needs final results,
+verification, and interpretation after the complete rerun.
+
+The VM-local diagnostic runner now performs a separate 5-second physical NIC
+capture validation before its ordinary samples, saves a pcap and validation.json,
+checks actual host-network Pod addresses, and requires zero matched TCP packets
+and zero capture drops. tcpdump is installed on node2. This validation is not
+part of its five-sample averages.
+
+After the 22-step study completes, restore the initial host-vxlan-1450 mode and
+repeat a full 5x30s host baseline using the now-stable sampler, then use that
+latest baseline for the main mode comparison. This also leaves the cluster in
+its initial mode. Early sampler additions were made during the first host
+baseline; the queue/reversal and later mode runs use the settled implementation.
+One clean way is to append setup-host-vxlan-1450 + host-1450-final-baseline steps
+to the completed manifest and resume the same study (preserve all history).
+The analysis selects the last baseline per mode, so the final host repeat will
+replace the initial host baseline only in the main comparison; queue-control
+tables retain the initial A/B/A sequence. Do not stop work at detached status.
+
 The study first measures current host-vxlan-1450 (5x30s, Pod-only), profiles it
 separately, enables two virtio queues on the two workers, measures throughput,
 restores original drivers, and performs a three-sample reversal check. It then

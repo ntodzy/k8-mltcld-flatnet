@@ -230,8 +230,8 @@ class Monitor:
                 for line in self.process.stdout:
                     record = json.loads(line)
                     record['received_epoch'] = time.time()
-                    if record['kind'] in ('perf_data', 'drop_data'):
-                        name = 'perf.data' if record['kind'] == 'perf_data' else 'drops.data'
+                    if record['kind'] in ('perf_data', 'drop_data', 'capture_data'):
+                        name = {'perf_data': 'perf.data', 'drop_data': 'drops.data', 'capture_data': 'capture.pcap'}[record['kind']]
                         with (self.directory / name).open('ab') as perf:
                             perf.write(base64.b64decode(record['base64'], validate=True))
                         continue
@@ -267,6 +267,56 @@ class Monitor:
             self.error = self.error or f'Monitor SSH exited {self.process.returncode}; see ssh-stderr.log'
 
 
+def capture_is_empty(result):
+    if result is None or result.get('exit_code') != 0:
+        return False
+    for label in ('packets captured', 'packets received by filter', 'packets dropped by kernel'):
+        match = re.search(r'(\d+) ' + label, result.get('log', ''))
+        if match is None or int(match[1]) != 0:
+            return False
+    return True
+
+
+def verify_local_path(args, hosts, ssh_config, output):
+    """Separate validation run: require full-size local VM TCP to stay off the link."""
+    directory = output / 'local-path-validation'
+    directory.mkdir()
+    hypervisor = hosts[args.client]['hypervisor']
+    config = json.loads((ROOT / 'infrastructure/config.json').read_text())
+    interface = next(host['network']['source'] for host in config['hypervisors'] if host['name'] == hypervisor)
+    ips = [hosts[name]['experiment_ipv4'].split('/')[0] for name in (args.client, args.server)]
+    monitor = Monitor(ssh_config, 'cs740-' + hypervisor + '-jump', directory / 'capture')
+    try:
+        if not monitor.ready.wait(120):
+            raise RuntimeError('Local-path capture monitor did not become ready')
+        monitor.control(json.dumps({'capture': {'interface': interface, 'filter': f'tcp and host {ips[0]} and host {ips[1]}'}}))
+        deadline = time.monotonic() + 20
+        while not any(record['kind'] == 'capture_started' for record in monitor.records):
+            if monitor.error or monitor.process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError('Local-path physical capture did not start')
+            time.sleep(.1)
+        subprocess.run([sys.executable, str(ROOT / 'experiments/run.py'), 'vm-local',
+                        '--client', args.client, '--server', args.server, '--test-type', 'multi',
+                        '--network', 'host', '--samples', '1', '--duration', '5', '--streams', str(args.streams),
+                        '--output', str(directory / 'measurement')], check=True)
+    finally:
+        monitor.stop()
+    result = next((record for record in monitor.records if record['kind'] == 'capture_result'), None)
+    if result is None or result['exit_code'] != 0:
+        raise RuntimeError('Local-path physical capture did not finish successfully')
+    pods = json.loads((directory / 'measurement/test-pods.json').read_text())['items']
+    expected = {args.client: ips[0], args.server: ips[1]}
+    if ({pod['spec']['nodeName'] for pod in pods} != set(expected) or
+            any(not pod['spec'].get('hostNetwork') or pod['status'].get('podIP') != expected.get(pod['spec']['nodeName']) for pod in pods)):
+        raise RuntimeError('Local-path capture filter did not match the actual benchmark host IPs')
+    passed = capture_is_empty(result)
+    save_json(directory / 'validation.json', {'status': 'passed' if passed else 'failed',
+              'interface': interface, 'endpoint_ips': ips, 'capture': result,
+              'scope': 'TCP unicast between the benchmark VM experiment IPs during a separate 5-second multistream run'})
+    if not passed:
+        raise RuntimeError('Local VM TCP appeared on the physical NIC or the capture lost packets; see validation.json')
+
+
 def run_diagnostics(args, hosts, ssh_config):
     plan = phases(args)
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
@@ -289,6 +339,8 @@ def run_diagnostics(args, hosts, ssh_config):
                     targets=targets, report_count=0, started_utc=datetime.now(timezone.utc).isoformat())
     save_json(output / 'metadata.json', manifest)
     try:
+        if args.mode == 'vm-local':
+            verify_local_path(args, hosts, ssh_config, output)
         for sample, network, test in plan:
             name = f'sample-{sample:02d}-{network}-{test}'
             directory = output / 'phases' / name

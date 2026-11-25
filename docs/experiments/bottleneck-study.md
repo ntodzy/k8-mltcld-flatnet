@@ -6,6 +6,11 @@ multi-VM scaling, Hubble toggles, or Cilium tuning profiles. Main measurements
 use five 30-second samples, four streams, Pod traffic across worker-1/worker-2;
 the local mode uses host traffic across worker-2/worker-3. All modes retain the
 existing Cilium baseline and host offload configuration.
+Before its quantitative samples, the local mode performs a separate 5-second
+multistream validation with a physical-NIC TCP capture filtered to the two VM
+experiment IPs. It checks the actual host-network Pod addresses, requires zero
+matching packets and zero capture drops, and saves the pcap and validation JSON.
+That validation run is excluded from the five-sample performance averages.
 
 ## Running and watching
 

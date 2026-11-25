@@ -104,7 +104,12 @@ def snapshot():
             continue
         interfaces[device.name] = {
             flag: command(['ethtool', flag, device.name])
-            for flag in ('-k', '-l', '-x', '-S')}
+            for flag in ('-k', '-l', '-x', '-S', '-g', '-i')}
+    domains = {}
+    if shutil.which('virsh'):
+        listed = command(['virsh', 'list', '--name'])
+        if listed.get('exit_code') == 0:
+            domains = {name: command(['virsh', 'dumpxml', name]) for name in listed['output'].splitlines() if name.strip()}
     return {
         'interfaces': interfaces,
         'links': command(['ip', '-j', '-s', '-d', 'link', 'show']),
@@ -117,6 +122,13 @@ def snapshot():
         'nic_numa_nodes': {device.name: read(device / 'device/numa_node') for device in Path('/sys/class/net').iterdir()
                            if (device / 'device/numa_node').exists()},
         'memory': read('/proc/meminfo'),
+        'kernel_command_line': read('/proc/cmdline'),
+        'nic_iommu_types': {device.name: read(device / 'device/iommu_group/type') for device in Path('/sys/class/net').iterdir()
+                            if (device / 'device/iommu_group/type').exists()},
+        'domain_xml': domains,
+        'bridge_netfilter': command(['sysctl', 'net.bridge.bridge-nf-call-iptables', 'net.bridge.bridge-nf-call-ip6tables']),
+        'iptables_counters': command(['iptables-save', '-c']),
+        'modules': read('/proc/modules'),
         'interrupts': read('/proc/interrupts'),
         'affinity': {str(p): read(p) for p in Path('/proc/irq').glob('*/smp_affinity_list')},
         'rps': {str(p): read(p) for p in Path('/sys/class/net').glob('*/queues/rx-*/rps_cpus')},
@@ -174,6 +186,8 @@ def main():
     profile_log = None
     drop_profiler = None
     drop_log = None
+    capture = None
+    capture_log = None
     try:
         emit('before', snapshot())
         emit('ready', {'hostname': os.uname().nodename, 'profile_requested': profile})
@@ -188,6 +202,19 @@ def main():
                     EXPECTED_PODS = {pod['uid']: pod for pod in settings.get('pods', [])}
                     REQUIRE_IDENTITY = settings.get('require_identity', False)
                     emit('pod_identity', {'pods': list(EXPECTED_PODS.values()), 'required': REQUIRE_IDENTITY})
+                    if settings.get('capture') and capture is None:
+                        spec = settings['capture']
+                        capture_log = (workspace / 'capture.log').open('w+')
+                        capture = subprocess.Popen(['tcpdump', '-n', '-U', '-i', spec['interface'],
+                            '-s', '128', '-w', str(workspace / 'capture.pcap'), spec['filter']],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=capture_log,
+                            start_new_session=True)
+                        ready_by = time.monotonic() + 10
+                        while 'listening on' not in (workspace / 'capture.log').read_text():
+                            if capture.poll() is not None or time.monotonic() >= ready_by:
+                                raise RuntimeError('Physical-interface capture failed to start')
+                            time.sleep(.1)
+                        emit('capture_started', spec)
                 elif control.startswith('profile ') and profile and profiler is None:
                     duration = int(control.split()[1])
                     if not 1 <= duration <= 3600:
@@ -226,7 +253,7 @@ def main():
             emit('profile_result', {
                 'exit_code': profiler.returncode,
                 'log': (workspace / 'perf.log').read_text(),
-                'report': command(['perf', 'report', '--stdio', '-i', str(workspace / 'perf.data')]),
+                'report': command(['perf', 'report', '--stdio', '--no-children', '--call-graph', 'none', '-i', str(workspace / 'perf.data')]),
             })
             if (workspace / 'perf.data').exists():
                 # Chunk binary output to keep memory and JSON line sizes bounded.
@@ -252,6 +279,17 @@ def main():
                     while chunk := stream.read(49152):
                         emit('drop_data', {'base64': base64.b64encode(chunk).decode()})
             drop_log.close()
+        if capture is not None:
+            if capture.poll() is None:
+                os.killpg(capture.pid, signal.SIGINT)
+                capture.wait(timeout=15)
+            capture_log.flush()
+            emit('capture_result', {'exit_code': capture.returncode, 'log': (workspace / 'capture.log').read_text()})
+            if (workspace / 'capture.pcap').exists():
+                with (workspace / 'capture.pcap').open('rb') as stream:
+                    while chunk := stream.read(49152):
+                        emit('capture_data', {'base64': base64.b64encode(chunk).decode()})
+            capture_log.close()
         shutil.rmtree(workspace)
 
 

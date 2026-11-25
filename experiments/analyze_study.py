@@ -219,6 +219,7 @@ def report(directory, output, partial=False):
                                     f'Recording log: `{entry.get("log", "").strip()}`.')
         text += ['', 'Profiles use software CPU-clock sampling; skb drop traces cover up to 15 seconds of a separate diagnostic run. '
                  'Drop reasons and call sites are system-wide and are not proof that every event belongs to the benchmark. '
+                 'NOT_SPECIFIED events, particularly buffer-fragment frees at skb_release_data, must not be counted as lost benchmark packets. '
                  'Raw profiles and diagnostic streams remain under the profile attempt. Profile throughput is excluded from the main comparisons.']
     else:
         text.append('Profiling has not completed.')

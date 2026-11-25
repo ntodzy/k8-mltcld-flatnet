@@ -16,6 +16,14 @@ from test_diagnostics import record
 
 
 class BottleneckTests(unittest.TestCase):
+    def test_local_capture_requires_no_accepted_or_lost_packets(self):
+        good = {'exit_code': 0, 'log': '0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n'}
+        self.assertTrue(diagnostics.capture_is_empty(good))
+        for label in ('packets captured', 'packets received by filter', 'packets dropped by kernel'):
+            self.assertFalse(diagnostics.capture_is_empty({**good, 'log': good['log'].replace('0 ' + label, '1 ' + label)}))
+        self.assertFalse(diagnostics.capture_is_empty({'exit_code': 0, 'log': ''}))
+        self.assertFalse(diagnostics.capture_is_empty(None))
+
     def test_efficiency_uses_physical_host_cpu_without_adding_guest_cpu_again(self):
         phase = {'test_type': 'multi', 'directory': 'phase'}
         targets = {
