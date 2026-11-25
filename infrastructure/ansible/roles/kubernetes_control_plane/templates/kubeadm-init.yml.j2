@@ -1,6 +1,10 @@
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
+{% if cilium_forwarding_profile | default('baseline') != 'baseline' %}
+skipPhases:
+  - addon/kube-proxy
+{% endif %}
 localAPIEndpoint:
   advertiseAddress: {{ kubernetes_node_ip }}
   bindPort: 6443

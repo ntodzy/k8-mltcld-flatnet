@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import uuid
 
-from common import GENERATED, MODES, ALL_MODES, ROOT, VM_VXLAN_MODES, guests, remote, save_json, ssh_command, mtu_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, VM_VXLAN_MODES, HOST_BPF_MODES, VM_BPF_MODES, guests, remote, save_json, ssh_command, mtu_profile, forwarding_profile
 
 KUBECTL = ['sudo', '-n', 'kubectl', '--kubeconfig=/etc/kubernetes/admin.conf']
 CILIUM = ['sudo', '-n', '/usr/local/bin/cilium', '--kubeconfig=/etc/kubernetes/admin.conf']
@@ -47,7 +47,17 @@ def perf_arguments(args, namespace, report_dir, client_hostname, server_hostname
         '--test-namespace', namespace,
         '--namespace-labels', 'pod-security.kubernetes.io/enforce=privileged',
         '--report-dir', report_dir,
-    ]
+    ] + (['--setup-delay', '60s'] if args.mode in HOST_BPF_MODES else [])
+
+
+def validate_forwarding(data, mode):
+    if mode not in VM_BPF_MODES:
+        return
+    expected = {'kube-proxy-replacement': 'true', 'enable-bpf-masquerade': 'true',
+                'enable-host-legacy-routing': str(mode == 'vm-vxlan-bpf-legacy-1450').lower()}
+    for key, value in expected.items():
+        if str(data.get(key, '')).lower() != value:
+            raise ValueError(f'Guest forwarding profile mismatch: {key} must be {value}')
 
 
 def cpu_counts(text):
@@ -129,6 +139,12 @@ def main():
     parser.add_argument('--profile', action='store_true', help='Separate diagnostic run with system-wide perf profiling; requires --diagnostics')
     parser.add_argument('--path-control', choices=('tunnel', 'bypass'), help='Explicit controlled path for the latency-isolation study')
     args = parser.parse_args()
+    if (GENERATED / 'forwarding-control.json').exists():
+        parser.error('A host BPF session is active or needs cleanup; inspect generated/forwarding-control.json')
+    if args.mode in HOST_BPF_MODES and (args.same_node or (not args.pod_only and args.network != 'pod')):
+        parser.error('Host BPF experiments require --pod-only or --network pod, and cross-VM traffic')
+    if args.mode in HOST_BPF_MODES and args.samples != 1 and not args.diagnostics:
+        parser.error('Use --diagnostics for multiple host BPF samples so each phase has verified counters')
     from path_control import MARKER
     if MARKER.exists():
         control = json.loads(MARKER.read_text())
@@ -181,10 +197,15 @@ def main():
         'test_type': args.test_type, 'network': args.network,
         'setup': active, 'mtu_profile': mtu_profile(args.mode), 'status': 'running',
         'path_control': args.path_control,
+        'forwarding_profile': forwarding_profile(args.mode),
+        'forwarding_implementation': ('custom-host-tc' if args.mode in HOST_BPF_MODES else
+                                      'cilium-host-routing' if args.mode in VM_BPF_MODES else 'baseline'),
     }
     save_json(output / 'metadata.json', metadata)
     remote_dir = None
     before = {}
+    bypass = None
+    guest_tunnel_before = {}
     try:
         nodes = json.loads(remote(ssh_config, controller, KUBECTL + ['get', 'nodes', '-o', 'json']))
         save_json(output / 'nodes-before.json', nodes)
@@ -197,6 +218,7 @@ def main():
             '-n', 'kube-system', 'get', 'configmap', 'cilium-config', '-o', 'json']))
         save_json(output / 'cilium-config.json', config)
         data = config['data']
+        validate_forwarding(data, args.mode)
         expected_routing = 'tunnel' if args.mode == 'vxlan' else 'native'
         expected_direct = 'false' if args.mode == 'vxlan' or args.mode in VM_VXLAN_MODES else 'true'
         expected_mtu = mtu_profile(args.mode)['cilium_mtu']
@@ -204,6 +226,23 @@ def main():
                 data.get('auto-direct-node-routes') != expected_direct or
                 int(data.get('mtu', 0)) != expected_mtu):
             raise ValueError('Live Cilium routing/MTU does not match the requested experiment')
+        if args.mode in VM_BPF_MODES:
+            statuses = {}
+            proxy_sets = json.loads(remote(ssh_config, controller, KUBECTL +
+                ['-n','kube-system','get','daemonsets','-o','json']))
+            if any(d['metadata']['name'] == 'kube-proxy' for d in proxy_sets['items']):
+                raise ValueError('Guest BPF profiles require a fresh setup without the kube-proxy DaemonSet')
+            wanted = 'Legacy' if forwarding_profile(args.mode) == 'bpf-legacy' else 'BPF'
+            for name in (args.client, args.server):
+                pods = json.loads(remote(ssh_config, controller, KUBECTL + ['-n', 'kube-system', 'get',
+                     'pods', '-l', 'k8s-app=cilium', '--field-selector', 'spec.nodeName='+name, '-o', 'json']))
+                if len(pods['items']) != 1:raise ValueError('Cannot identify the endpoint Cilium agent')
+                pod = pods['items'][0]['metadata']['name']
+                statuses[name] = remote(ssh_config, controller, KUBECTL + ['-n','kube-system','exec',pod,
+                        '--','cilium-dbg','status','--verbose'])
+                if not re.search(r'Host Routing:\s*'+wanted+r'\b', statuses[name]):
+                    raise ValueError(f'{name}: active Host Routing is not {wanted}; configuration alone is insufficient')
+            save_json(output/'host-routing-status.json', statuses)
         (output / 'cilium-version.txt').write_text(remote(ssh_config, controller, CILIUM + ['version']))
         (output / 'cilium-status.txt').write_text(remote(ssh_config, controller, CILIUM + ['status', '--wait']))
         targets = {name: name for name in (args.client, args.server)}
@@ -218,6 +257,11 @@ def main():
             (output / f'{label}-routes.json').write_text(snapshot['routes'])
             if label in (args.client, args.server):
                 validate_vm_tunnel(snapshot, label, hosts, args.mode)
+                if args.mode in VM_BPF_MODES:
+                    from path_control import validate
+                    validate(snapshot, label, hosts, 'vm-vxlan-1450', 'tunnel', nodes)
+                    guest_tunnel_before[label] = json.loads(remote(ssh_config, label,
+                        ['ip','-j','-s','link','show','dev','cs740vx']))[0]
             if args.path_control:
                 from path_control import validate
                 validate(snapshot, label, hosts, args.mode, args.path_control, nodes)
@@ -231,22 +275,45 @@ def main():
                                   node_map[args.client]['metadata']['labels']['kubernetes.io/hostname'],
                                   node_map[args.server]['metadata']['labels']['kubernetes.io/hostname'])
         metadata['command'] = shlex.join(command)
+        if args.mode in HOST_BPF_MODES:
+            from host_bypass import HostBypass
+            bypass = HostBypass(args, hosts, controller, namespace+'-1', output)
         save_json(output / 'metadata.json', metadata)
         print(f'Results: {output}\nRunning {args.samples} samples of each test ({args.duration}s per sample).', flush=True)
         with (output / 'console.log').open('w') as log:
             with subprocess.Popen(ssh_command(ssh_config, controller, command), text=True,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
+                if bypass:
+                    try:
+                        bypass.attach(process)
+                    except BaseException:
+                        process.terminate()
+                        raise
                 for line in process.stdout:
                     print(line, end='', flush=True)
                     log.write(line)
                     log.flush()
                 metadata['exit_code'] = process.wait()
+        if bypass:
+            session, bypass = bypass, None
+            session.stop()
         # Save performance reports before collecting optional diagnostic snapshots.
         with (output / 'reports.tar.gz').open('wb') as archive:
             subprocess.run(ssh_command(ssh_config, controller,
                                        ['sudo', '-n', 'tar', '-C', remote_dir, '-czf', '-', '.']),
                            stdout=archive, check=True)
         metadata['report_count'] = unpack_reports(output / 'reports.tar.gz', output / 'reports')
+        if guest_tunnel_before:
+            proof = {}
+            for name, initial in guest_tunnel_before.items():
+                final = json.loads(remote(ssh_config, name, ['ip','-j','-s','link','show','dev','cs740vx']))[0]
+                deltas = {direction:final['stats64'][direction]['packets']-initial['stats64'][direction]['packets']
+                          for direction in ('rx','tx')}
+                proof[name] = {'before':initial,'after':final,'packet_deltas':deltas}
+                if not all(v > 0 for v in deltas.values()):
+                    save_json(output/'guest-tunnel-activity.json',proof)
+                    raise ValueError(f'{name}: custom VXLAN has no bidirectional activity; refusing a bypass result')
+            save_json(output/'guest-tunnel-activity.json',proof)
         cpu = {}
         for label, target in targets.items():
             try:
@@ -271,6 +338,10 @@ def main():
         metadata['error'] = str(error)
         raise
     finally:
+        if bypass:
+            try:bypass.stop(require_traffic=False)
+            except BaseException as error:
+                metadata.setdefault('cleanup_errors', []).append(str(error))
         # Remove only this invocation's namespace, never cilium-test or another run.
         # Completed netperf workloads have no persistent state; shorten their
         # termination grace instead of spending 30 seconds per diagnostic phase.

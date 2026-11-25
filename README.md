@@ -32,6 +32,10 @@ SSH jump-host configuration are reused; no SSH key setup is needed.
 | [Per-VM VXLAN MTU 1450](docs/experiments/vm-vxlan-1450.md) | Custom guest tunnel at the same inner MTU as Cilium VXLAN |
 | [Hypervisor VXLAN MTU 1450](docs/experiments/host-vxlan-1450.md) | Shared host tunnel at the same inner MTU as Cilium VXLAN |
 
+Optional [BPF forwarding experiments](docs/experiments/bpf-forwarding.md) add
+separate host bridge pass-through/redirect modes and guest legacy/BPF host-routing
+modes. They have individual setup guides and are excluded from the default eight.
+
 For example:
 
 ```bash
@@ -65,6 +69,7 @@ This resets the cluster between modes and saves all results together.
 - [Host VXLAN bottleneck study and complete rerun](docs/experiments/bottleneck-study.md)
 - [Paired tunnel latency isolation and kernel timing](docs/experiments/latency-isolation.md)
 - [CPU idle effects and optional VXLAN BPF prototype](docs/vxlan-latency-and-optimization.md)
+- [Host and guest BPF forwarding experiment comparison](docs/experiments/bpf-forwarding.md)
 - [Hypervisor setup and NIC tuning](docs/hypervisors.md)
 - [Infrastructure deployment and networking](docs/infrastructure.md)
 - [Research abstract and schedule](docs/project-plan.md)

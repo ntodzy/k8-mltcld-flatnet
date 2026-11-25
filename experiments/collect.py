@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 
-from common import GENERATED, MODES, ROOT, mtu_profile, save_json
+from common import GENERATED, MODES, ALL_MODES, HOST_BPF_MODES, ROOT, mtu_profile, save_json, base_mode, forwarding_profile
 from run import positive, select_pair
 from setup import deployment_config
 
@@ -131,9 +131,11 @@ def current_setup(manifest):
         raise ValueError('No successful current setup; run setup.py for the next mode first')
     active = json.loads(path.read_text())
     mode = pending['mode']
-    cluster_mode = 'native' if mode == 'vm-local' else mode
+    cluster_mode = 'native' if mode == 'vm-local' else 'direct-1450' if mode == 'bridge-1450' else base_mode(mode)
     expected = {key: value for key, value in mtu_profile(mode).items() if key != 'cilium_mtu'}
     expected.update(mode=mode, cluster_mode=cluster_mode)
+    if forwarding_profile(mode) != 'baseline':
+        expected['forwarding_profile'] = forwarding_profile(mode)
     if any(active.get(key) != value for key, value in expected.items()):
         raise ValueError(f'Current successful setup does not match next mode {mode} and its MTUs; run setup.py {mode} first')
     return active
@@ -235,7 +237,7 @@ def execute_collection(directory, manifest, reuse_setup=False):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=ROOT / 'infrastructure/config.json')
-    parser.add_argument('--modes', nargs='+', choices=MODES, default=list(MODES))
+    parser.add_argument('--modes', nargs='+', choices=ALL_MODES, default=list(MODES))
     parser.add_argument('--client')
     parser.add_argument('--server')
     parser.add_argument('--local-client')
@@ -273,6 +275,10 @@ def main():
             raise ValueError('--use-current-setup requires --resume')
         if args.pod_only and 'vm-local' in args.modes:
             raise ValueError('--pod-only cannot include vm-local; select Pod experiments using --modes')
+        if any(mode in HOST_BPF_MODES for mode in args.modes) and not args.pod_only:
+            raise ValueError('Host BPF experiments require --pod-only')
+        if any(mode in HOST_BPF_MODES for mode in args.modes) and args.samples > 1 and not args.diagnostics:
+            raise ValueError('Multiple host BPF samples require --diagnostics for per-phase path verification')
         config_path = args.config.expanduser().resolve()
         source = json.loads(config_path.read_text())
         deployment_config(source, args.modes[0], config_path.parent)

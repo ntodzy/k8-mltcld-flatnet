@@ -60,6 +60,15 @@ interfaces, or select an experiment.
   its programs to Cilium-managed interfaces. It shares the collection lock,
   retains Linux VXLAN, and produces no comparable cluster performance samples.
   See `docs/vxlan-latency-and-optimization.md` for limits and integration work.
+- Optional integrated modes are `host-vxlan-bpf-pass-1450`,
+  `host-vxlan-bpf-1450`, `vm-vxlan-bpf-legacy-1450`, `vm-vxlan-bpf-1450`.
+  They are accepted by setup/run/collect but excluded from default `MODES`.
+  Host modes use lifetime-scoped exact-flow L2 redirects on managed TAP/VXLAN
+  ports; guest modes use Cilium-supported host routing with matching service/
+  masquerade prerequisites. Do not install the raw lab program on Pod devices.
+  Keep the controls distinct. Host mode multiple samples require diagnostics;
+  all host BPF runs require Pod-only traffic. `forwarding-control.json` blocks
+  normal runs/setup after an unverified cleanup. See `docs/experiments/bpf-forwarding.md`.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run

@@ -8,11 +8,12 @@ readonly ANSIBLE_DIR="${SCRIPT_DIR}/ansible"
 inventory_file="${SCRIPT_DIR}/generated/guest_inventory.json"
 inventory_was_selected=false
 network_mode=""
+forwarding_profile="baseline"
 action="apply"
 
 usage() {
   cat <<'EOF'
-Usage: ./cluster.sh [-i FILE] [--network-mode MODE] [apply|reset|validate]
+Usage: ./cluster.sh [-i FILE] [--network-mode MODE] [--forwarding-profile PROFILE] [apply|reset|validate]
 
 Builds the kubeadm cluster described by the generated guest inventory. The
 validate action performs local Ansible syntax validation and does not contact
@@ -22,6 +23,7 @@ reboots guests, preserving VM disks and SSH keys.
 Options:
   -i, --inventory FILE  Guest inventory (default: generated/guest_inventory.json)
   --network-mode MODE   Cilium datapath: vxlan (default), native, direct-1450, vm-vxlan, host-vxlan, vm-vxlan-1450, host-vxlan-1450
+  --forwarding-profile PROFILE  baseline (default), bpf-legacy, bpf; use setup.py for experiments
   -h, --help            Show this help
 EOF
 }
@@ -42,6 +44,11 @@ while (($# > 0)); do
     --network-mode)
       (($# >= 2)) || die "$1 requires a mode"
       network_mode="$2"
+      shift 2
+      ;;
+    --forwarding-profile)
+      (($# >= 2)) || die "$1 requires a profile"
+      forwarding_profile="$2"
       shift 2
       ;;
     apply|reset|validate)
@@ -67,6 +74,13 @@ case "${network_mode}" in
 esac
 
 command -v ansible-playbook >/dev/null 2>&1 || die "required command not found: ansible-playbook"
+case "${forwarding_profile}" in
+  baseline|bpf-legacy|bpf) ;;
+  *) die "forwarding profile must be baseline, bpf-legacy, or bpf" ;;
+esac
+if [[ "${forwarding_profile}" != baseline && "${network_mode}" != vm-vxlan-1450 ]]; then
+  die "BPF forwarding profiles require the custom VM MTU-1450 mode"
+fi
 command -v jq >/dev/null 2>&1 || die "required command not found: jq"
 if [[ "${action}" == "validate" && "${inventory_was_selected}" == false && ! -r "${inventory_file}" ]]; then
   inventory_file="${SCRIPT_DIR}/kubernetes/inventory.example.json"
@@ -98,6 +112,7 @@ if [[ "${action}" == "reset" ]]; then
   playbook="${ANSIBLE_DIR}/playbooks/reset-kubernetes.yml"
 fi
 playbook_args=(-i "${inventory_file}" "${playbook}")
+playbook_args+=(--extra-vars "cilium_forwarding_profile=${forwarding_profile}")
 if [[ -n "${network_mode}" ]]; then
   playbook_args+=(--extra-vars "cilium_network_mode=${network_mode}")
 fi

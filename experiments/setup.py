@@ -10,7 +10,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from common import GENERATED, MODES, ALL_MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile, base_mode, forwarding_profile
 
 
 def deployment_config(source, mode, config_dir):
@@ -49,7 +49,7 @@ def hypervisor_inventory(config, mode, ssh_config, subnet):
                                for vm in host['vms']],
         }
     return {'all': {'children': {'hypervisors': {'hosts': hosts}}, 'vars': {
-        'experiment_mode': mode,
+        'experiment_mode': base_mode(mode),
         'experiment_underlay_mtu': mtu_profile(mode)['physical_mtu'],
         'experiment_inner_mtu': mtu_profile(mode)['inner_mtu'],
         'experiment_guest_mtu': mtu_profile(mode)['guest_mtu'],
@@ -65,7 +65,23 @@ def main():
                         help='Remove Kubernetes/Cilium state and reboot all guests first; preserves disks and SSH keys')
     parser.add_argument('--underlay-subnet', default='10.75.0.0/24')
     parser.add_argument('--dry-run', action='store_true', help='Print the plan without SSH or file changes')
+    parser.add_argument('--reuse-base', action='store_true',
+                        help='Host BPF modes only: reuse an already prepared matching host-vxlan-1450 topology')
     args = parser.parse_args()
+    if args.reuse_base:
+        from common import HOST_BPF_MODES
+        if args.reset or args.mode not in HOST_BPF_MODES + ('host-vxlan-1450',):
+            parser.error('--reuse-base is only for host BPF/base modes and cannot accompany --reset')
+        if (GENERATED/'forwarding-control.json').exists() or (GENERATED/'path-control.json').exists():
+            parser.error('Restore active forwarding/path controls before changing labels')
+        active = json.loads((GENERATED/'active-experiment.json').read_text())
+        if base_mode(active['mode']) != 'host-vxlan-1450' or any(
+                active.get(k) != v for k,v in {'physical_mtu':1500,'guest_mtu':1450,'inner_mtu':1450}.items()):
+            parser.error('No matching successful host VXLAN MTU-1450 setup to reuse')
+        active.update(mode=args.mode, forwarding_profile='baseline')
+        if not args.dry_run:save_json(GENERATED/'active-experiment.json', active)
+        print('Reuse matching host topology; per-run live TAP/tunnel checks remain required: '+args.mode)
+        return
     config_path = args.config.resolve()
     source = json.loads(config_path.read_text())
     config = deployment_config(source, args.mode, config_path.parent)
@@ -78,7 +94,7 @@ def main():
         parser.error('host-vxlan requires at least two hypervisors')
     host_file = GENERATED / 'experiment_hypervisors.json'
     config_file = GENERATED / 'experiment_config.json'
-    cluster_mode = 'native' if args.mode == 'vm-local' else 'direct-1450' if args.mode == 'bridge-1450' else args.mode
+    cluster_mode = 'native' if args.mode == 'vm-local' else 'direct-1450' if args.mode == 'bridge-1450' else base_mode(args.mode)
     playbooks = ROOT / 'infrastructure/ansible/playbooks'
     commands = []
     if args.reset:
@@ -91,7 +107,8 @@ def main():
     commands += [
         [str(ROOT / 'infrastructure/deploy.sh'), '--config', str(config_file), '--auto-approve', 'apply'],
         ['ansible-playbook', '-i', str(inventory), '-i', str(host_file), str(playbooks / 'experiment-guests.yml')],
-        [str(ROOT / 'infrastructure/cluster.sh'), '--network-mode', cluster_mode, 'apply'],
+        [str(ROOT / 'infrastructure/cluster.sh'), '--network-mode', cluster_mode,
+         '--forwarding-profile', forwarding_profile(args.mode), 'apply'],
     ]
     if args.dry_run:
         print(f'Generated deployment: {config_file} (base config and keys preserved)')
@@ -100,6 +117,8 @@ def main():
             print(shlex.join(command))
         return
     # Invalidate any previous successful setup before changing the cluster.
+    if (GENERATED / 'forwarding-control.json').exists():
+        raise ValueError('An active host BPF session must be cleaned up before setup')
     (GENERATED / 'active-experiment.json').unlink(missing_ok=True)
     if not args.reset:
         for name in guests(inventory):
@@ -113,6 +132,7 @@ def main():
         subprocess.run(command, env=env, check=True, cwd=ROOT)
     save_json(GENERATED / 'active-experiment.json', {
         'mode': args.mode, 'cluster_mode': cluster_mode,
+        'forwarding_profile': forwarding_profile(args.mode),
         'physical_mtu': host_inventory['all']['vars']['experiment_underlay_mtu'],
         'guest_mtu': host_inventory['all']['vars']['experiment_guest_mtu'],
         'inner_mtu': host_inventory['all']['vars']['experiment_inner_mtu'],

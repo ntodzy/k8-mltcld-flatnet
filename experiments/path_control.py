@@ -79,6 +79,8 @@ def specifications(mode, condition, config, inventory, nodes):
 
 
 def switch(mode, condition, output):
+    if (GENERATED/'forwarding-control.json').exists():
+        raise ValueError('Restore the active host BPF session before changing paths')
     active = json.loads((GENERATED / 'active-experiment.json').read_text())
     if active['mode'] != mode:
         raise ValueError('Prepare the matching custom VXLAN mode first')

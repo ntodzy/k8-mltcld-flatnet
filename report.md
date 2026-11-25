@@ -4,6 +4,9 @@ The CPU idle explanation and optional forwarding prototype are documented
 separately in [VXLAN latency and optimization](docs/vxlan-latency-and-optimization.md).
 The prototype is a validated isolated correctness lab; it adds no performance
 samples to the completed study below.
+Optional [host and guest forwarding experiment modes](docs/experiments/bpf-forwarding.md)
+now allow a separate follow-up collection; their functional validation is not
+pooled into the completed latency/performance estimates.
 
 ## Latency isolation follow-up: matched paths and kernel observations
 

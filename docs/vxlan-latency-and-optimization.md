@@ -3,6 +3,11 @@
 Recorded November 25, 2026. This follow-up supports the completed paper dataset;
 it does not change its baseline or require a new full study.
 
+Subsequent integration adds [separate host/guest forwarding experiments](experiments/bpf-forwarding.md).
+Host modes use a flow-scoped L2 bridge redirect/pass-through pair; guest modes
+use Cilium's supported legacy/BPF host-routing pair. The standalone raw lab
+program described below is still not installed on Cilium-managed interfaces.
+
 ## What was isolated
 
 Five same-boot, same-attachment tunnel/bypass pairs measured additional mean

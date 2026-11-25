@@ -6,8 +6,25 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED = ROOT / 'infrastructure/generated'
-VM_VXLAN_MODES = ('vm-vxlan', 'vm-vxlan-1450')
-HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450')
+BPF_MODES = {
+    'host-vxlan-bpf-pass-1450': 'host-vxlan-1450',
+    'host-vxlan-bpf-1450': 'host-vxlan-1450',
+    'vm-vxlan-bpf-legacy-1450': 'vm-vxlan-1450',
+    'vm-vxlan-bpf-1450': 'vm-vxlan-1450',
+}
+HOST_BPF_MODES = tuple(m for m in BPF_MODES if m.startswith('host-'))
+VM_BPF_MODES = tuple(m for m in BPF_MODES if m.startswith('vm-'))
+VM_VXLAN_MODES = ('vm-vxlan', 'vm-vxlan-1450') + VM_BPF_MODES
+HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450') + HOST_BPF_MODES
+
+
+def base_mode(mode):
+    return BPF_MODES.get(mode, mode)
+
+
+def forwarding_profile(mode):
+    return ('bpf-legacy' if mode == 'vm-vxlan-bpf-legacy-1450' else
+            'bpf' if mode == 'vm-vxlan-bpf-1450' else 'baseline')
 # Inner IP MTU, guest transport NIC MTU, physical MTU, Cilium MTU override.
 # A guest doing encapsulation needs 50 extra bytes on its transport NIC.
 MTU_PROFILES = {
@@ -22,8 +39,9 @@ MTU_PROFILES = {
     'bridge-1450': (1450, 1450, 1500, 1450),
 }
 CONTROL_MODES = ('bridge-1450',)
+MTU_PROFILES.update({mode: MTU_PROFILES[base] for mode, base in BPF_MODES.items()})
 ALL_MODES = tuple(MTU_PROFILES)
-MODES = tuple(mode for mode in ALL_MODES if mode not in CONTROL_MODES)
+MODES = tuple(mode for mode in ALL_MODES if mode not in CONTROL_MODES and mode not in BPF_MODES)
 
 
 def mtu_profile(mode):
