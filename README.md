@@ -35,6 +35,8 @@ SSH jump-host configuration are reused; no SSH key setup is needed.
 Optional [BPF forwarding experiments](docs/experiments/bpf-forwarding.md) add
 separate host bridge pass-through/redirect modes and guest legacy/BPF host-routing
 modes. They have individual setup guides and are excluded from the default eight.
+The [host latency follow-up](docs/experiments/host-latency-optimization.md) tests
+guest BPF forwarding while retaining hypervisor VXLAN, with paired idle-policy controls.
 
 For example:
 

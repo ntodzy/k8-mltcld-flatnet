@@ -72,6 +72,13 @@ interfaces, or select an experiment.
   `experiments/forwarding_trace.py MODE` is an optional separate instrumented
   RR check using the existing four-machine tracer and worker-1/worker-2 pair;
   do not pool its measurements with untraced collection phases.
+- `host_latency_study.py` compares unchanged-boot default/10µs hypervisor idle
+  policy pairs, with separate optional traces. `analyze_host_latency.py` retains
+  study/mode/workload/pair identities. New host-vxlan-routing-legacy-1450 and
+  host-vxlan-routing-bpf-1450 profiles change supported Cilium forwarding inside
+  the guests while retaining the physical host tunnel and bridge. They are not
+  the host TC shortcut. Reset is required to restore their guest prerequisites;
+  never relabel them through --reuse-base. See docs/experiments/host-latency-optimization.md.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run

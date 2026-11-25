@@ -17,7 +17,7 @@ from cpu_latency import requests, close_requests
 from latency_study import environment, measured
 
 
-def plan(modes, samples, workloads):
+def plan(modes, samples, workloads, trace=False):
     steps = []
     for mode in modes:
         steps.append(dict(name='prepare-'+mode, kind='setup', mode=mode))
@@ -29,6 +29,8 @@ def plan(modes, samples, workloads):
                     steps.append(dict(name=f'{mode}-{workload}-pair-{pair}-{policy}',
                                       kind='measurement', mode=mode, pair=pair,
                                       workload=workload, cpu_latency_us=limit))
+        if trace:
+            steps.append(dict(name=mode+'-instrumented-trace', kind='trace', mode=mode))
     steps.append(dict(name='restore-original-host-mode', kind='setup', mode='host-vxlan-1450'))
     return [dict(step, status='pending', attempts=[]) for step in steps]
 
@@ -56,6 +58,23 @@ def execute(directory, state):
                         run_logged([sys.executable, str(ROOT/'experiments/setup.py'), step['mode'], '--reset'], work/'setup.log')
                     state.setdefault('environments', {})[step['mode']] = environment()
                     attempt['reused_setup'] = reuse
+                elif step['kind'] == 'trace':
+                    from analyze_latency import trace_rows, write_csv
+                    from forwarding_trace import validate_tunnel_execution
+                    from latency_study import targets
+                    command = [sys.executable, str(ROOT/'experiments/run.py'), step['mode'],
+                               '--client','worker-1','--server','worker-2','--pod-only',
+                               '--diagnostics','--test-type','rr','--samples','1','--duration','30',
+                               '--output',str(work/'measurement')]
+                    measured(command,work,step['mode'],True)
+                    rows=trace_rows(work,dict(mode=step['mode'],condition='instrumented'))
+                    save_json(work/'kernel-observations.json',rows)
+                    write_csv(work/'kernel-observations.csv',rows)
+                    validate_tunnel_execution(rows,step['mode'],targets())
+                    for path in (work/'measurement').rglob('metadata.json'):
+                        item=json.loads(path.read_text())
+                        item.update(instrumented=True,instrumentation='bounded-forwarding-trace')
+                        save_json(path,item)
                 else:
                     current = environment()
                     save_json(work/'environment.json', current)
@@ -103,6 +122,7 @@ def main():
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--trace', action='store_true', help='Separate instrumented path validation after each mode')
     args = parser.parse_args()
     if args.samples < 3 or not 15 <= args.duration <= 120:
         parser.error('Use at least three samples and 15–120 seconds per sample')
@@ -117,7 +137,7 @@ def main():
     else:
         directory = (args.output or ROOT/'results'/('host-latency-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))).resolve()
         state = dict(kind='extended-study', study_type='host-latency-optimization',
-                     status='pending', phase='pending', plan=plan(args.modes, args.samples, args.workloads),
+                     status='pending', phase='pending', plan=plan(args.modes, args.samples, args.workloads,args.trace),
                      duration=args.duration, config_sha256=digest,
                      git_snapshot=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
                      created_utc=datetime.now(timezone.utc).isoformat())
@@ -130,6 +150,15 @@ def main():
             raise ValueError('Restore active path/forwarding controls first')
         if not args.resume:
             directory.mkdir(parents=True, exist_ok=False)
+            files=['experiments/'+name for name in ('host_latency_study.py','cpu_latency.py','run.py','common.py','setup.py',
+                   'diagnostics.py','diagnostic_agent.py','latency_study.py','latency_trace.py')]
+            state['source_sha256']={}
+            for name in files:
+                raw=(ROOT/name).read_bytes()
+                target=directory/'source'/name
+                target.parent.mkdir(parents=True,exist_ok=True)
+                target.write_bytes(raw)
+                state['source_sha256'][name]=hashlib.sha256(raw).hexdigest()
         if args.background:
             write_manifest(directory,state)
             sys.stdout.flush()
