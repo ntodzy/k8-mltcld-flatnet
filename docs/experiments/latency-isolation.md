@@ -65,6 +65,26 @@ and receive/GRO handoff.
 
 ## Reports and recovery
 
+After the initial study passes, the optional host CPU idle-policy control adds
+three rounds containing all four path/policy combinations:
+
+```bash
+./experiments/latency_study.py --resume results/latency-isolation-TIMESTAMP \
+  --append-idle-controls --background
+```
+
+Each round measures tunnel and bypass under both the default CPU idle policy and
+a temporary 10µs CPU latency QoS request on both hypervisors. The matched change
+in the tunnel penalty tests whether idle policy amplifies the path difference.
+Both policy conditions hold the same kind of descriptor/SSH helper; the default
+condition requests the default target. Effective targets and restoration are
+verified, and per-state usage/time counters are saved. This is a fresh host-mode
+block, with no reboot between its cases; its defaults are measured again rather
+than subtracting the earlier block's values. It adds 14 steps (44 total).
+The requests are removed by closing their descriptors, with a ten-minute
+fallback lifetime. No persistent governor, affinity, guest or NIC settings are
+changed. See [Linux CPU latency QoS](https://docs.kernel.org/power/pm_qos_interface.html).
+
 ```bash
 python3 experiments/analyze_latency.py results/latency-isolation-TIMESTAMP \
   --output results/latency-isolation-TIMESTAMP/analysis

@@ -3,15 +3,41 @@ from pathlib import Path
 import sys
 import unittest
 import tempfile
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import latency_study
 import latency_trace
 import path_control
 import analyze_latency
+import cpu_latency
 
 
 class LatencyIsolationTests(unittest.TestCase):
+    def test_noop_cpu_policy_is_rejected_and_all_requests_close(self):
+        import threading
+        created = []
+        class Request:
+            def __init__(self, target, limit, directory):
+                self.records = [{'kind': 'ready', 'before_us': 0, 'effective_us': 0}]
+                self.ready = threading.Event(); self.ready.set(); self.closed = False
+                created.append(self)
+            def stop(self):self.closed = True
+        with patch.object(latency_study, 'targets', return_value={'h1': ('host1', 'worker-1', 'enoX'), 'h2': ('host2', 'worker-2', 'enoX')}), patch.object(cpu_latency, 'CPULatencyRequest', Request):
+            with self.assertRaisesRegex(RuntimeError, 'already constrained'):
+                cpu_latency.requests(10, Path('/tmp/unused'))
+        self.assertEqual(len(created), 2)
+        self.assertTrue(all(request.closed for request in created))
+    def test_idle_interaction_is_a_matched_difference_of_differences(self):
+        rows = [dict(idle_pair=1, cpu_latency_us=limit, condition=condition, mean_us=value)
+                for limit, condition, value in [(None, 'bypass', 700), (None, 'tunnel', 1000),
+                                                 (10, 'bypass', 100), (10, 'tunnel', 200)]]
+        result = analyze_latency.idle_interactions(rows)[0]
+        self.assertEqual(result['interaction_us'], 200)
+        controls = latency_study.idle_controls()
+        self.assertEqual(len([step for step in controls if step['kind'] == 'measurement']), 12)
+        self.assertTrue(all('pair' not in step for step in controls))
+        self.assertEqual(controls[-1]['kind'], 'restore')
     def test_pairs_do_not_mix_instrumented_observations(self):
         rows = [dict(mode='vm-vxlan-1450', pair=1, condition='bypass', trace=False, mean_us=500, p99_us=900),
                 dict(mode='vm-vxlan-1450', pair=1, condition='tunnel', trace=False, mean_us=700, p99_us=1000),

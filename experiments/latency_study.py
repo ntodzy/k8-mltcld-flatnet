@@ -50,6 +50,20 @@ def targets():
     return result
 
 
+def idle_controls():
+    steps = [dict(name='prepare-idle-interaction', kind='setup', reuse=True)]
+    for pair in range(1, 4):
+        levels = [None, 10] if pair % 2 else [10, None]
+        for level in levels:
+            conditions = ['tunnel', 'bypass'] if pair % 2 else ['bypass', 'tunnel']
+            for condition in conditions:
+                name = 'default' if level is None else '10us'
+                steps.append(dict(name=f'idle-pair-{pair}-{name}-{condition}', kind='measurement',
+                                  idle_pair=pair, cpu_latency_us=level, condition=condition))
+    steps.append(dict(name='restore-after-idle-controls', kind='restore'))
+    return [dict(step, mode='host-vxlan-1450', block='idle-interaction', status='pending', attempts=[]) for step in steps]
+
+
 def environment():
     script = '''import json,os,subprocess
 from pathlib import Path
@@ -150,7 +164,7 @@ def execute(directory, state):
                 if step['kind'] == 'setup':
                     restore_path(work)
                     active = GENERATED / 'active-experiment.json'
-                    reuse = (step['name'] == 'prepare-host-vxlan-1450' and active.exists()
+                    reuse = ((step['name'] == 'prepare-host-vxlan-1450' or step.get('reuse')) and active.exists()
                              and json.loads(active.read_text())['mode'] == step['mode'])
                     if not reuse:
                         run_logged([sys.executable, str(ROOT / 'experiments/setup.py'), step['mode'], '--reset'], work / 'setup.log')
@@ -158,14 +172,16 @@ def execute(directory, state):
                     if step['name'] == 'restore-original-host-mode':
                         state['restored_environment'] = current
                     else:
-                        state.setdefault('environments', {})[step['mode']] = current
+                        state.setdefault('environments', {})[step.get('block', step['mode'])] = current
                     attempt['reused_setup'] = reuse
+                elif step['kind'] == 'restore':
+                    restore_path(work)
                 else:
                     if step.get('condition'):
                         switch(step['mode'], step['condition'], work / 'path-audit.json')
                     current = environment()
                     save_json(work / 'environment.json', current)
-                    if current != state['environments'][step['mode']]:
+                    if current != state['environments'][step.get('block', step['mode'])]:
                         raise RuntimeError('Kernel, boot identity, worker affinity, queues or experiment NIC changed within the controlled block')
                     command = [sys.executable, str(ROOT / 'experiments/run.py'), step['mode'],
                                '--client', 'worker-1', '--server', 'worker-2', '--pod-only', '--diagnostics',
@@ -173,7 +189,16 @@ def execute(directory, state):
                                '--output', str(work / 'measurement')]
                     if step.get('condition'):
                         command += ['--path-control', step['condition']]
-                    measured(command, work, step['mode'], step.get('trace', False))
+                    holders = []
+                    try:
+                        if 'idle_pair' in step:
+                            from cpu_latency import requests
+                            holders = requests(step['cpu_latency_us'] if step['cpu_latency_us'] is not None else -1, work / 'cpu-latency')
+                        measured(command, work, step['mode'], step.get('trace', False))
+                    finally:
+                        if holders:
+                            from cpu_latency import close_requests
+                            close_requests(holders)
                     metadata = json.loads((work / 'measurement/metadata.json').read_text())
                     if metadata['status'] != 'passed':
                         raise RuntimeError('Measurement did not pass')
@@ -202,8 +227,11 @@ def main():
     parser.add_argument('--pairs', type=int, default=5)
     parser.add_argument('--duration', type=int, default=30)
     parser.add_argument('--background', action='store_true')
+    parser.add_argument('--append-idle-controls', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
+    if args.append_idle_controls and not args.resume:
+        parser.error('--append-idle-controls requires --resume')
     if args.pairs < 2 or args.duration < 20:
         parser.error('Use at least two pairs and 20-second tests')
     digest = hashlib.sha256((ROOT / 'infrastructure/config.json').read_bytes()).hexdigest()
@@ -211,6 +239,10 @@ def main():
         directory = args.resume.resolve(); state = json.loads((directory / 'collection.json').read_text())
         if state['config_sha256'] != digest:
             raise ValueError('Base configuration changed')
+        if args.append_idle_controls:
+            if state.get('idle_controls_added') or state['status'] != 'passed':
+                raise ValueError('Finish the initial study first; idle controls can be added once')
+            state['plan'].extend(idle_controls());state.update(status='pending', idle_controls_added=True)
     else:
         directory = (args.output or ROOT / 'results' / ('latency-isolation-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))).resolve()
         state = dict(kind='extended-study', study_type='latency-isolation', status='pending', phase='pending',

@@ -43,6 +43,11 @@ def trace_rows(directory, step):
                 maps.update(record['data'])
         functions = ready['functions']
         devices = ready['specification']['devices']
+        for index, name in enumerate(functions):
+            if str(index) not in maps.get('@function_ns', {}):
+                result.append(dict(mode=step['mode'], condition=step.get('condition', 'reference'),
+                                   target=raw.parent.name, kernel=ready['kernel'], family='function', stage=name,
+                                   count=0, mean_us=None, total_us=0, max_us=None, p99_bin_upper_us=None))
         for name, family in [('@function_ns', 'function'), ('@wakeup_ns', 'wakeup'),
                              ('@queue_ns', 'queue'), ('@offcpu_ns', 'offcpu'),
                              ('@halt_ns', 'halt'),
@@ -79,6 +84,23 @@ def paired_differences(trials):
             for (mode, pair), values in paired.items() if set(values) == {'tunnel', 'bypass'}]
 
 
+def idle_interactions(trials):
+    pairs = {}
+    for row in trials:
+        if row.get('idle_pair') is not None:
+            pairs.setdefault(row['idle_pair'], {})[(row.get('cpu_latency_us'), row['condition'])] = row['mean_us']
+    output = []
+    for pair, values in pairs.items():
+        if len(values) == 4:
+            normal = values[(None, 'tunnel')] - values[(None, 'bypass')]
+            constrained = values[(10, 'tunnel')] - values[(10, 'bypass')]
+            output.append(dict(pair=pair, default_extra_us=normal, constrained_extra_us=constrained,
+                               interaction_us=normal - constrained,
+                               default_bypass_us=values[(None, 'bypass')], default_tunnel_us=values[(None, 'tunnel')],
+                               constrained_bypass_us=values[(10, 'bypass')], constrained_tunnel_us=values[(10, 'tunnel')]))
+    return output
+
+
 def load(directory, state):
     trials, traces = [], []
     for step in state['plan']:
@@ -92,6 +114,7 @@ def load(directory, state):
                       if row['domain'] == 'performance' and row['sample'] == sample and row['test'] == 'TCP_RR'}
             summary = json.loads((work / 'measurement' / phase['directory'] / 'summary.json').read_text())
             row = dict(mode=step['mode'], condition=step.get('condition', 'reference'), pair=step.get('pair'),
+                       idle_pair=step.get('idle_pair'), cpu_latency_us=step.get('cpu_latency_us'),
                        trace=step.get('trace', False), sample=sample, mean_us=values['mean'],
                        p99_us=values['p99'], ops=values['throughput'], source=work.name)
             for target in ('worker-1', 'worker-2'):
@@ -121,7 +144,7 @@ def plots(output, trials, differences, traces):
     modes = ('host-vxlan-1450', 'vm-vxlan-1450')
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout='constrained')
     for axis, mode in zip(axes, modes):
-        rows = [row for row in trials if row['mode'] == mode and not row['trace']]
+        rows = [row for row in trials if row['mode'] == mode and not row['trace'] and row.get('idle_pair') is None]
         for pair in sorted({row['pair'] for row in rows}):
             selected = {row['condition']: row for row in rows if row['pair'] == pair}
             if set(selected) == {'tunnel', 'bypass'}:
@@ -146,7 +169,20 @@ def plots(output, trials, differences, traces):
     for extension in ('svg', 'png'):
         fig.savefig(output / f'paired-difference.{extension}', dpi=180)
     plt.close(fig)
-    active = [row for row in traces if row['family'] == 'function' and row['condition'] != 'bypass']
+    idle = idle_interactions(trials)
+    if idle:
+        fig, axis = plt.subplots(figsize=(8, 4.5), layout='constrained')
+        for row in idle:
+            axis.plot([0, 1], [row['default_extra_us'], row['constrained_extra_us']], 'o-', label=f'Round {row["pair"]}')
+        axis.axhline(0, color='black', linewidth=.7)
+        axis.set_xticks([0, 1], ['Default CPU idle policy', '10µs latency QoS'])
+        axis.set_ylabel('Tunnel − bypass mean transaction latency (µs)')
+        axis.set_title('Does CPU idle policy amplify the tunnel path penalty?')
+        axis.grid(axis='y', alpha=.2); axis.legend()
+        for extension in ('svg', 'png'):
+            fig.savefig(output / f'idle-interaction.{extension}', dpi=180)
+        plt.close(fig)
+    active = [row for row in traces if row['family'] == 'function' and row['condition'] != 'bypass' and row['count'] > 0]
     if active:
         fig, axes = plt.subplots(2, 2, figsize=(13, 8), layout='constrained')
         for axis, stage in zip(axes.flat, ('vxlan_build_skb', '__iptunnel_pull_header', 'vxlan_xmit', 'vxlan_rcv')):
@@ -169,11 +205,34 @@ def report(directory, output, partial=False):
         raise ValueError('Incomplete study; use --partial for an explicitly interim report')
     trials, traces = load(directory, state)
     differences = paired_differences(trials)
+    idle = idle_interactions(trials)
     output.mkdir(parents=True, exist_ok=False)
     write_csv(output / 'trials.csv', trials); write_csv(output / 'paired-differences.csv', differences)
     write_csv(output / 'kernel-timings.csv', traces)
+    write_csv(output / 'idle-interactions.csv', idle)
     save_json(output / 'evidence.json', dict(trials=trials, paired_differences=differences, kernel_timings=traces,
-                                           environments=state.get('environments'), source=str(directory)))
+                                           idle_interactions=idle, environments=state.get('environments'), source=str(directory)))
+    metadata, attachments = [], []
+    for step in state['plan']:
+        if not step.get('trace') or step['status'] != 'passed':
+            continue
+        work = directory / step['attempts'][-1]['directory']
+        for path in (work / 'traces').glob('*/trace.jsonl'):
+            with path.open() as source:
+                ready = next(json.loads(line) for line in source if json.loads(line)['kind'] == 'ready')
+            metadata.append(dict(case=step['name'], target=path.parent.name,
+                                 timing=ready.get('timing_configuration'), hooks=ready.get('kernel_hooks')))
+            if not path.parent.name.startswith('worker-'):
+                continue
+            hooks = ready.get('kernel_hooks', {})
+            net = hooks.get('bpf_net', {})
+            entries = json.loads(net['output']) if net.get('exit_code') == 0 else []
+            filters = [entry for namespace in entries for entry in namespace.get('tc', [])]
+            for device in hooks.get('tc', {}):
+                programs = [entry.get('kind', '') + '/' + entry.get('name', '') for entry in filters if entry.get('devname') == device]
+                attachments.append([step['mode'] + '/' + step.get('condition', 'reference'), path.parent.name, device,
+                                    ', '.join(programs) or ('none observed' if net.get('exit_code') == 0 else 'TCX coverage unavailable')])
+    save_json(output / 'timing-and-hooks.json', metadata)
     plots(output, trials, differences, traces)
     text = ['# Isolating custom VXLAN latency', '',
             '**Completed study.**' if state['status'] == 'passed' else '**INTERIM: study incomplete.**', '',
@@ -188,7 +247,7 @@ def report(directory, output, partial=False):
     for mode in ('host-vxlan-1450', 'vm-vxlan-1450'):
         selected = [row for row in differences if row['mode'] == mode]
         delta = [row['extra_mean_us'] for row in selected]
-        values = {condition: [row['mean_us'] for row in trials if row['mode'] == mode and row['condition'] == condition and not row['trace']]
+        values = {condition: [row['mean_us'] for row in trials if row['mode'] == mode and row['condition'] == condition and not row['trace'] and row.get('idle_pair') is None]
                   for condition in ('tunnel', 'bypass')}
         rows.append([mode, len(delta), describe(values['bypass']), describe(values['tunnel']), describe(delta),
                      f'{min(delta):.3f}..{max(delta):.3f}' if delta else 'unavailable'])
@@ -198,16 +257,32 @@ def report(directory, output, partial=False):
              'They include outer lookup/headers, receive handling, batching, interrupts and scheduling effects induced by the path; '
              'they are not an isolated header-writing CPU cost. Sample SD describes variation across five pairs; '
              'these are not independent host reservations or randomized cluster deployments. P99 differences in the CSV '
-             'are differences between per-run percentiles, not a percentile of paired individual packets.', '',
-             '## Tracer perturbation and Cilium reference', '']
+             'are differences between per-run percentiles, not a percentile of paired individual packets.', '']
+    if idle:
+        text += ['## CPU idle-latency interaction control', '',
+                 aggregate.table(['Round', 'Default bypass µs', 'Default tunnel µs', 'Default extra µs', '10µs bypass µs', '10µs tunnel µs', '10µs extra µs', 'Interaction µs'],
+                                 [[r['pair'], *(f'{r[key]:.3f}' for key in ('default_bypass_us', 'default_tunnel_us', 'default_extra_us',
+                                   'constrained_bypass_us', 'constrained_tunnel_us', 'constrained_extra_us', 'interaction_us'))] for r in idle]), '',
+                 'This separate host-mode block keeps the same VM boots, attachments, queues and masks. Each round includes '
+                 'both paths under the default policy and under a temporary 10µs CPU latency QoS request on both hypervisors. '
+                 'The interaction is the default tunnel penalty minus the constrained tunnel penalty. '
+                 f'Mean interaction: {describe([r["interaction_us"] for r in idle])} µs. '
+                 'Three rounds are an exploratory mechanism control, not an independent collection across host reservations. '
+                 'The descriptor-scoped requests are closed after every case; effective targets, restoration and idle-state '
+                 'counter snapshots are retained in cpu-latency/request.jsonl. No CPU governor, affinity, guest or NIC settings are changed. '
+                 '[Raw interaction observations](idle-interactions.csv).', '',
+                 '![CPU idle interaction](idle-interaction.png)', '']
+    text += ['## Tracer perturbation and Cilium reference', '']
     rows = []
-    for mode, condition in sorted({(row['mode'], row['condition']) for row in trials}):
-        untraced = [row['mean_us'] for row in trials if row['mode'] == mode and row['condition'] == condition and not row['trace']]
+    for mode, condition in sorted({(row['mode'], row['condition']) for row in trials if row.get('idle_pair') is None}):
+        untraced = [row['mean_us'] for row in trials if row['mode'] == mode and row['condition'] == condition and not row['trace'] and row.get('idle_pair') is None]
         instrumented = [row['mean_us'] for row in trials if row['mode'] == mode and row['condition'] == condition and row['trace']]
         rows.append([mode, condition, describe(untraced), describe(instrumented),
                      f'{100 * (statistics.mean(instrumented) / statistics.mean(untraced) - 1):+.1f}%' if untraced and instrumented else 'unavailable'])
-    text += [aggregate.table(['Mode', 'Condition', 'Untraced mean µs ± SD', 'Instrumented mean µs', 'Descriptive change'], rows), '',
+    text += [aggregate.table(['Mode', 'Condition', 'Untraced mean µs ± SD', 'Run mean µs (15 s traced)', 'Descriptive change'], rows), '',
              'Instrumented runs are separate single observations and are excluded from the primary paired estimates. '
+             'Each 30-second case contains approximately 15 seconds of active tracing; its overall mean therefore mixes '
+             'traced and untraced execution and dilutes the tracing-window perturbation. '
              'Their change versus the untraced average is a perturbation check, with order/ordinary run variability still possible. '
              'Function durations are inclusive wall time with kprobe/kretprobe bookkeeping overhead. Nested functions overlap, '
              'and small helper durations may be dominated by the instrumentation floor. Do not sum these means into a transaction-latency budget.', '',
@@ -215,7 +290,7 @@ def report(directory, output, partial=False):
     selected = [row for row in traces if row['family'] == 'function']
     text += [aggregate.table(['Mode/condition', 'Machine/kernel', 'Function', 'Calls', 'Mean µs', 'P99 upper bin µs'],
                             [[row['mode'] + '/' + row['condition'], row['target'] + '/' + row['kernel'], row['stage'], row['count'],
-                              f'{row["mean_us"]:.3f}', f'{row["p99_bin_upper_us"]:.3f}' if row['p99_bin_upper_us'] else 'unavailable'] for row in selected]), '']
+                              f'{row["mean_us"]:.3f}' if row['mean_us'] is not None else 'no hits', f'{row["p99_bin_upper_us"]:.3f}' if row['p99_bin_upper_us'] else 'unavailable'] for row in selected]), '']
     if selected:
         text += ['![Kernel function timings](kernel-functions.png)', '']
     text += ['The narrow vxlan_build_skb helper includes header preparation, headroom and offload setup; '
@@ -223,6 +298,14 @@ def report(directory, output, partial=False):
              'additional nested work and are not pure header construction/removal. ip_forward and br_forward observations '
              'select IPv4 TCP between Pod addresses in 10.244.0.0/16; tunnel and backend observations are device/task scoped '
              'and can include other traffic. No guest/host or cross-host clocks are subtracted.', '',
+             'Very small residual tunnel-helper counts in bypass cases can represent other traffic; '
+             'their means do not establish that the benchmark used the tunnel. Inspect the call counts and route/bridge audits.', '',
+             '## Observed guest attachment programs', '',
+             aggregate.table(['Mode/condition', 'Machine', 'Device', 'Programs from bpftool net'], attachments), '',
+             'An empty legacy tc filter listing does not exclude TCX attachments. The bpftool observations above '
+             'are captured before benchmark deployment, so newly created benchmark veth interfaces are not listed. '
+             'Available function probes with no hits are reported explicitly; unsupported functions are absent from '
+             'the ready function list. [CPU timing policy and hook snapshots](timing-and-hooks.json).', '',
              '## Scheduling, receive handoff and device queue observations', '']
     selected = [row for row in traces if row['family'] in ('wakeup', 'receive_handoff', 'receive_deferred', 'queue', 'halt')]
     text += [aggregate.table(['Mode/condition', 'Machine', 'Metric/stage', 'Count', 'Mean µs', 'P99 upper bin µs'],
