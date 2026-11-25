@@ -1,14 +1,122 @@
 # Networking Experiment Suite
 
-The CPU idle explanation and optional forwarding prototype are documented
-separately in [VXLAN latency and optimization](docs/vxlan-latency-and-optimization.md).
-The prototype is a validated isolated correctness lab; it adds no performance
-samples to the completed study below.
-Optional [host and guest forwarding experiment modes](docs/experiments/bpf-forwarding.md)
-now allow a separate follow-up collection; their functional validation is not
-pooled into the completed latency/performance estimates.
+## Result groups: mode-only, BPF forwarding, and CPU idle tuning
 
-## Latency isolation follow-up: matched paths and kernel observations
+These are separate experiments. **Approximately 400 µs applies to the improved
+custom modes and Cilium under a temporary physical-host idle constraint. It is
+not the result of simply switching the original VXLAN modes.** The complete
+[results selection guide](docs/results-guide.md) lists the exact successful
+attempts and filters to use from `results/`, including exclusions.
+
+| Label | Question | Results we care about |
+|---|---|---|
+| **A1 — No additional optimizations** | Original three-mode, matched-MTU head-to-head | [collection-20261125T020122.055126Z](results/collection-20261125T020122.055126Z/); only the three successful attempts listed in the guide |
+| **A2 — No additional optimizations** | Monitored rerun; primary baseline table below | [extended-study-20261125T042706Z](results/extended-study-20261125T042706Z/); only `vxlan-baseline`, `vm-vxlan-1450-baseline`, `host-1450-final-baseline` |
+| **B1 — Our hypervisor TC shortcut** | Did flow-specific TAP↔VXLAN redirect work? | [bpf-integration-smoke-20261125T171045.529636Z](results/bpf-integration-smoke-20261125T171045.529636Z/); correctness-only short runs, not a repeatable speedup estimate |
+| **B2 — BPF guest forwarding** | Can supported BPF routing shorten the VMs' path while retaining custom VXLAN? | [host-latency-20261125T183320.140179Z](results/host-latency-20261125T183320.140179Z/); passed measurement steps with `cpu_latency_us: -1` / `*-default-*` |
+| **C — CPU idle tuning** | What changes when both hypervisors avoid deep idle? | Same host-latency collection, `cpu_latency_us: 10` / `*-10us-*`, paired against the same mode and pair number's default case |
+| **D — BPF-profile throughput** | Does the forwarding improvement preserve single/four-stream throughput? | [supervised workflow's throughput collection](results/host-followup-workflow-20261125T194314.961685Z/throughput/); default idle only; status/results updated after completion |
+| **E — Queues and affinity** | Can backend parallelism improve throughput? | Separate intervention/reversal steps in the extended study; never merge into A's baseline |
+
+### A — No additional optimizations: switch the networking mode
+
+Here we retain the original Cilium profiles, one guest NIC queue, broad CPU
+masks and default idle policy. We change the defined networking mode and its
+required MTU/attachment configuration. There is no additional experimental
+BPF bypass, CPU idle request, queue increase or affinity pin. Cilium still uses
+its normal BPF endpoint/overlay programs; “no additional optimizations” does not
+mean BPF or ordinary offloads are disabled.
+
+The selected **A2** baseline uses five 30-second observations per workload:
+
+| VXLAN mode, inner MTU 1450 | Single Gb/s | Four-stream Gb/s | Mean RR latency µs |
+|---|---:|---:|---:|
+| Cilium | 3.143 ± 0.111 | 4.015 ± 0.181 | 821.668 ± 53.065 |
+| Custom guest | 2.608 ± 0.148 | 4.597 ± 0.174 | 964.236 ± 29.301 |
+| Custom hypervisor | 3.603 ± 0.157 | 3.835 ± 0.109 | 1001.836 ± 12.392 |
+
+Thus the original host placement had strong single-stream throughput but higher
+latency and weaker stream scaling. A1 is an earlier independent collection;
+keep its observations separate from this rerun rather than pooling them.
+
+### B — BPF forwarding bypass: default idle policy
+
+There are **two different BPF changes**. B1 is our custom exact-flow hypervisor
+TC bridge shortcut. Its single 5-second pass/redirect smokes measured roughly
+1024→1012 µs, with slightly worse P99, and did not demonstrate a convincing
+latency gain. The isolated lab and integrated traces establish correctness and
+executed stages, not a primary performance improvement.
+
+The repeatable improvement is **B2: supported Cilium BPF forwarding inside the
+Kubernetes VMs**. Hypervisor VXLAN and its Linux bridge remain. Both host profiles
+share kube-proxy replacement and BPF masquerading prerequisites and differ in
+`hostLegacyRouting`. Their five 30-second, **default-idle** results are:
+
+| Configuration | Mean RR µs ± SD | Average sample P99 µs |
+|---|---:|---:|
+| Hypervisor VXLAN, prerequisite-matched legacy guest routing | 1007.952 ± 23.758 | 1745.6 |
+| Hypervisor VXLAN, BPF guest routing | 810.660 ± 57.375 | 1435.4 |
+| Guest VXLAN, BPF guest routing | 758.658 ± 178.839 | 1437.4 |
+| Fresh Cilium VXLAN reference, original profile | 759.718 ± 122.518 | 1414.2 |
+
+The host's default-policy mean improved by 19.6% against its prerequisite control.
+That control is already different from A's unchanged profile and must not be
+relabeled as A. The profile comparison involves different VM boots. The separate
+trace verified zero selected Pod-TCP `ip_forward` calls in the improved guests,
+while Linux VXLAN and bridge forwarding continued on the physical hosts. The
+custom guest tunnel also showed zero selected guest forwarding calls, with VXLAN
+transmit executing in the guests. These establish the intended paths; inclusive
+probe timings are excluded from primary performance estimates.
+
+Default-policy observations vary substantially. The guest median of per-run
+means was 811 µs versus 820 µs for host placement, despite their different point
+means above. These samples support comparable optimized configurations rather
+than a universal winner. This is not a comparison against a separately tuned
+Cilium/netkit profile.
+
+### C — CPU idle tuning: a separate, additional intervention
+
+Within each prepared mode, five AB/BA pairs compare default policy with a
+10 µs CPU latency QoS request on **both physical hypervisors**. The request limits
+idle-state eligibility; it is not a packet latency guarantee or CPU-frequency
+setting. VM boots, queues, allowed CPU masks, NIC settings and routing profile
+stay fixed inside each pair. Each request's removal/restoration is verified.
+
+| Configuration | Default mean RR µs ± SD | With idle constraint µs ± SD |
+|---|---:|---:|
+| Hypervisor VXLAN, legacy prerequisite control | 1007.952 ± 23.758 | 514.108 ± 10.416 |
+| Hypervisor VXLAN, BPF guest routing | 810.660 ± 57.375 | 400.762 ± 15.732 |
+| Guest VXLAN, BPF guest routing | 758.658 ± 178.839 | 408.726 ± 52.509 |
+| Cilium VXLAN reference | 759.718 ± 122.518 | 400.440 ± 25.327 |
+
+**The approximately 400 µs convergence belongs to C's controlled-policy cases.**
+The custom cases combine BPF forwarding with idle tuning; Cilium retains its
+original integrated overlay. CPU idle tuning alone leaves the legacy host path
+around 514 µs. The combined host BPF/idle configuration is 60.2% below its legacy/
+default prerequisite control, not an isolated encapsulation-function saving.
+Keeping CPUs awake may increase power consumption; power/energy were not measured.
+See [the full latency follow-up](docs/host-vxlan-latency-followup.md) for variability,
+trace evidence and the supporting three-pair screening block.
+
+### D — Throughput validation: forwarding profiles, default idle policy
+
+The supervised continuation collects five 30-second single-stream and four-stream
+samples for improved host VXLAN, BPF guest VXLAN and Cilium. It keeps one guest
+queue, broad CPU masks, existing physical NIC settings and **default CPU idle
+policy**. This checks throughput tradeoffs from the forwarding configurations.
+It is not a measurement of idle-tuned throughput. The workflow waits for the
+latency collection's final restoration before starting and restores the original
+host profile after completing throughput validation. Its raw location and
+acceptance rules are in [group D of the results guide](docs/results-guide.md#d--throughput-validation-bpf-profiles-default-idle-policy-only).
+
+Throughput validation is still queued/running; no new throughput estimate is
+claimed here until successful measurements are available. The approximately
+6.43 Gb/s host result discussed later is **E: two queues plus vhost affinity on
+the older forwarding profile**, not this BPF-only result or a measured combined
+BPF/idle/queue configuration.
+
+
+## Supporting diagnostics: matched paths and kernel observations
 
 The follow-up isolates a measurable marginal cost for each custom tunnel while holding its VM attachment and cluster configuration fixed. All five paired differences were positive: the custom VM path added **224 ±47 µs**, and the custom host path added **257 ±118 µs**, to mean TCP request/response latency. These are round-trip transaction differences, not one-way wire delays or an intrinsic cost of writing a VXLAN header. Our scripts configure Linux VXLAN devices; they do not implement a separate userspace packet encoder. Cilium and both custom deployments use the Linux VXLAN routines, with different forwarding integration and metadata.
 
@@ -25,6 +133,8 @@ The clearest implementation distinction is the forwarding path around the tunnel
 
 For the host tunnel, the extra work moved into the hypervisor backend. Instrumented worker `handle_tx` means were about **108–110 µs with host VXLAN versus 52–55 µs in bridge bypass**. The full VXLAN transmit callback averaged about 57 µs and included roughly 35 µs inside outer UDP/IP transmission; this is broader work than header preparation and includes downstream processing. Receive callbacks and the matched receive-to-GRO handoff expose additional stages. Scheduler wakeup-to-run means for the worker vCPUs were around 9–12 µs and changed little across conditions, so the traces do not demonstrate that generic runnable scheduler delay explains the whole penalty. They also do not cover every hardware-interrupt or virtual-interrupt delivery delay. The observations locate additional synchronous networking/backend work, but their inclusive durations overlap and cannot be summed into an RTT budget.
 
+### C supporting control — Path × idle-policy interaction
+
 A separate three-round, four-condition host experiment tested CPU idle-policy interaction without tracing. It compared both paths under the default policy and under descriptor-scoped 10 µs CPU latency QoS requests on both hypervisors, retaining the same VM boots, queues and masks throughout that block. The request constrains permitted CPU idle-state latency; it is not an application-latency guarantee. Idle-state counters verified that states advertising latency above 10 µs were not entered during constrained cases, and the original effective policy was restored after every case.
 
 | Fresh host idle-policy block, three samples per condition | Bypass mean µs ± SD | Tunnel mean µs ± SD | Paired tunnel penalty µs ± SD |
@@ -38,7 +148,7 @@ The completed follow-up contains **44 successful steps, 42 RR phase reports, and
 
 ![Marginal latency of the matched tunnel paths](results/latency-isolation-20261125T144819Z/analysis/paired-difference.png)
 
-## Completed overnight study: November 25, 2026
+## A2 baseline rerun and E queue/affinity interventions: November 25, 2026
 
 The complete rerun finished all 48 setup, measurement, queue, affinity, and restoration steps. Its 25 successful measurement steps produced 210 Cilium CLI phase reports, including four separate profiling phases; failed attempts and the short local-path validations are retained separately. The primary comparison below selects five 30-second samples for each of three workloads in all eight existing modes and the additional bridge control. Cross-host measurements use Pod traffic on worker-1 and worker-2; `vm-local` uses host-network traffic between worker-2 and worker-3. The latest full host baseline is used here, while its earlier baseline remains in the original queue comparison. Values are means ± sample standard deviation, not confidence intervals. These samples come from one overnight sequence rather than independent randomized collection rounds.
 

@@ -18,7 +18,7 @@ class LatencyIsolationTests(unittest.TestCase):
         import threading
         created = []
         class Request:
-            def __init__(self, target, limit, directory):
+            def __init__(self, target, limit, directory, lifetime=600):
                 self.records = [{'kind': 'ready', 'before_us': 0, 'effective_us': 0}]
                 self.ready = threading.Event(); self.ready.set(); self.closed = False
                 created.append(self)

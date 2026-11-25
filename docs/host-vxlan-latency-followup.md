@@ -4,6 +4,9 @@ This investigation is in progress. It extends the earlier completed studies;
 the paper's original mode measurements remain unchanged. The question is whether
 we can make hypervisor encapsulation competitive without conflating tunnel
 placement, guest forwarding, host bridge forwarding and CPU idle policy.
+In this framework, Cilium encapsulation already runs in the Kubernetes VM's
+kernel. Physical-host placement moves that work into the hypervisor kernel.
+Both retain Pod namespaces, guest Cilium processing and virtio transport.
 
 ## A repeatable initial improvement
 
@@ -81,7 +84,7 @@ fresh setup; these are configuration comparisons across separate boots, with
 same-boot paired estimates available for idle-policy effects. They are not an
 exclusive timing estimate for one function or encapsulation headers.
 
-The separate BPF trace recorded **zero guest `ip_forward` calls**, while both
+The separate BPF trace recorded **zero guest `ip_forward` calls for the selected Pod-TCP traffic**, while both
 physical hosts continued to execute Linux VXLAN transmit (12,411/12,408 calls)
 and bridge forwarding (24,724/24,727 calls). The improvement therefore accompanies
 a verified shorter guest path with the original physical bridge and tunnel
@@ -90,6 +93,30 @@ physical transmit callback's inclusive traced mean remained around 56 µs, and
 vhost handle_tx around 105–107 µs; these overlapping measurements cannot be added
 to reconstruct an end-to-end RTT. Evidence is in the same collection's
 host-vxlan-routing-bpf-1450-instrumented-trace-attempt-1 directory.
+
+## Matching both custom tunnel placements
+
+Custom guest VXLAN with BPF guest forwarding has now completed the same five
+30-second invocations per policy. Its default mean was 759 ± 179 µs and
+constrained mean 409 ± 53 µs, compared with 811 ± 57 and 401 ± 16 µs
+for physical-host VXLAN with BPF guest forwarding. These samples overlap
+substantially and provide no clear large placement latency penalty after the
+forwarding improvement.
+
+The guest/default average includes one fast 452.15 µs invocation, retained rather
+than excluded. The **median of the five per-run means** was 810.66 µs for guest
+VXLAN and 819.96 µs for physical VXLAN. Under the constraint these medians were
+417.65 and 400.35 µs, respectively. These are medians across invocations, distinct
+from each invocation's packet/transaction P50. The small sample and single VM
+boot per profile favor a conclusion of similar observed performance rather than
+a universal host/guest winner. The remaining variation has not been assigned to
+one exclusive cause.
+
+The separate guest trace observed 11,875/11,876 VXLAN transmit calls inside the
+VMs, zero physical VXLAN transmit calls and zero selected Pod-TCP `ip_forward` calls. Together
+with the physical-placement trace, this verifies the intended placement change
+while both modes use BPF guest forwarding. The physical attachment remains
+TAP/bridge versus macvtap, so this is still a complete configuration comparison.
 
 Moving VXLAN to a physical hypervisor retains the Pod namespace, guest Cilium
 processing and virtio transport. The previous bridge shortcut removed an
@@ -142,6 +169,6 @@ and [the configuration exported by ethtool](https://github.com/torvalds/linux/bl
 
 Reproduction and analysis commands are in
 [the experiment guide](experiments/host-latency-optimization.md). The larger
-custom-guest and Cilium comparisons are still running. The host optimization
+Cilium latency reference and queued throughput validation remain unfinished. The host optimization
 benefit above is measured; its relative ranking against those references is
 not yet established.

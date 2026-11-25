@@ -16,13 +16,15 @@ def current():
     finally:os.close(fd)
 def stop(signum,frame):raise SystemExit(128+signum)
 signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGHUP,stop)
-limit=int(sys.argv[1]);before=current();fd=os.open('/dev/cpu_dma_latency',os.O_RDWR)
+limit=int(sys.argv[1]);lifetime=int(sys.argv[2]) if len(sys.argv)>2 else 600
+if not 1<=lifetime<=7200:raise ValueError('CPU request lifetime must be 1–7200 seconds')
+before=current();fd=os.open('/dev/cpu_dma_latency',os.O_RDWR)
 try:
     os.write(fd,struct.pack('i',limit))
     effective=current()
     if limit>=0 and effective>limit:raise ValueError('CPU latency request was not effective')
-    print(json.dumps({'kind':'ready','before_us':before,'requested_us':limit,'effective_us':effective,'idle':idle()}),flush=True)
-    select.select([sys.stdin],[],[],600)
+    print(json.dumps({'kind':'ready','before_us':before,'requested_us':limit,'effective_us':effective,'lifetime_seconds':lifetime,'idle':idle()}),flush=True)
+    select.select([sys.stdin],[],[],lifetime)
 finally:
     after=idle();os.close(fd)
     print(json.dumps({'kind':'restored','effective_us':current(),'expected_us':before,'idle':after}),flush=True)
@@ -30,14 +32,16 @@ finally:
 
 
 class CPULatencyRequest:
-    def __init__(self, target, limit, directory):
+    def __init__(self, target, limit, directory, lifetime=600):
         from common import GENERATED, ssh_command
+        if not 1 <= lifetime <= 7200:
+            raise ValueError('CPU request lifetime must be 1–7200 seconds')
         self.directory = directory
         directory.mkdir(parents=True)
         self.records, self.ready = [], threading.Event()
         self.stderr = (directory / 'stderr.log').open('w')
         self.process = subprocess.Popen(ssh_command(GENERATED / 'ssh_config', target,
-                         ['sudo', '-n', 'python3', '-u', '-c', AGENT, str(limit)]),
+                         ['sudo', '-n', 'python3', '-u', '-c', AGENT, str(limit), str(lifetime)]),
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True)
         def read():
             try:
@@ -64,13 +68,13 @@ class CPULatencyRequest:
             raise RuntimeError('CPU latency QoS restoration was not verified; inspect ' + str(self.directory))
 
 
-def requests(limit, directory):
+def requests(limit, directory, lifetime=600):
     from latency_study import targets
     result = []
     try:
         for label, (target, domain, _) in targets().items():
             if domain:
-                request = CPULatencyRequest(target, limit, directory / label)
+                request = CPULatencyRequest(target, limit, directory / label, lifetime)
                 result.append(request)
         for request in result:
             request.ready.wait(60)
