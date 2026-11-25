@@ -198,6 +198,8 @@ def execute_collection(directory, manifest, reuse_setup=False):
                             '--client', step['client'], '--server', step['server'],
                             '--duration', str(parameters['duration']), '--samples', str(parameters['samples']),
                             '--streams', str(parameters['streams']), '--output', str(work / 'measurement')]
+                if parameters.get('test_type','all') != 'all':
+                    measurement += ['--test-type',parameters['test_type']]
                 if parameters.get('pod_only', False):
                     measurement.append('--pod-only')
                 if parameters.get('diagnostics', False):
@@ -210,6 +212,7 @@ def execute_collection(directory, manifest, reuse_setup=False):
                         result.get('samples') != parameters['samples'] or
                         result.get('duration_seconds') != parameters['duration'] or
                         result.get('streams') != parameters['streams'] or
+                        result.get('test_type','all') != parameters.get('test_type','all') or
                         result.get('diagnostics', False) != parameters.get('diagnostics', False) or
                         result.get('pod_only', False) != parameters.get('pod_only', False)):
                     raise RuntimeError('Measurement metadata does not describe a successful run')
@@ -245,6 +248,7 @@ def parse_args():
     parser.add_argument('--duration', type=positive, default=30)
     parser.add_argument('--samples', type=positive, default=5)
     parser.add_argument('--streams', type=positive, default=4)
+    parser.add_argument('--test-type', choices=('all','rr','single','multi','throughput'), default='all')
     parser.add_argument('--pod-only', action='store_true', help='Exclude host-network controls; requires modes excluding vm-local')
     parser.add_argument('--diagnostics', action='store_true', help='Isolate each sample/test/path and collect VM/hypervisor diagnostics')
     parser.add_argument('--rounds', type=positive, default=1)
@@ -290,7 +294,8 @@ def main():
                     'parameters': {'config': str(config_path), 'duration': args.duration,
                                    'samples': args.samples, 'streams': args.streams, 'rounds': args.rounds,
                                    'host_profile': args.host_profile, 'underlay_subnet': args.underlay_subnet,
-                                   'pod_only': args.pod_only, 'diagnostics': args.diagnostics},
+                                   'pod_only': args.pod_only, 'diagnostics': args.diagnostics,
+                                   'test_type': args.test_type},
                     'plan': build_plan(args.modes, args.rounds, endpoints)}
     print(f'Collection: {directory}', flush=True)
     for step in manifest['plan']:

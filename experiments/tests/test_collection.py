@@ -48,6 +48,7 @@ class CollectionTests(unittest.TestCase):
         (directory / 'metadata.json').write_text(json.dumps({
             'status': 'passed', 'report_count': 1, 'mode': command[2], 'client': 'worker-1',
             'server': 'worker-2', 'samples': 5, 'duration_seconds': 30, 'streams': 4,
+            'test_type': command[command.index('--test-type')+1] if '--test-type' in command else 'all',
             'pod_only': '--pod-only' in command, 'diagnostics': '--diagnostics' in command}))
         (directory / 'reports/result.json').write_text(json.dumps({'dataItems': [{
             'data': {'TCP_STREAM_pod-to-pod_throughput': 5000.5}, 'unit': 'Mb/s',
@@ -84,12 +85,14 @@ class CollectionTests(unittest.TestCase):
             generated, output = self.prepare(Path(temp))
             manifest = self.manifest()
             manifest['parameters']['diagnostics'] = True
+            manifest['parameters']['test_type'] = 'rr'
             with patch.object(collect, 'GENERATED', generated), \
                     patch.object(collect, 'run_logged', side_effect=self.fake_runner) as execute:
                 collect.execute_collection(output, manifest)
             commands = [call.args[0] for call in execute.call_args_list if '/experiments/run.py' in call.args[0][1]]
             self.assertEqual(len(commands), 2)
             self.assertTrue(all('--diagnostics' in command for command in commands))
+            self.assertTrue(all(command[command.index('--test-type')+1]=='rr' for command in commands))
             self.assertEqual(manifest['status'], 'passed')
 
     def test_failure_stops_then_resume_retries_without_overwriting_successful_runs(self):

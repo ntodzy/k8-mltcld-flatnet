@@ -41,6 +41,11 @@ shortcut. They are not identical BPF implementations moved between kernels.
 ## Run the complete optional comparison
 
 Existing hypervisor and node SSH credentials are reused. From the repository root:
+Host modes also require a local clang with a BPF target and existing remote
+`tc`, `bpftool`, libvirt and passwordless sudo. The current testbed has these;
+the runner records compiler/preflight failures rather than installing packages
+during a performance sample. Keep host BPF result directories under `results/`
+so interrupted-session recovery can validate their ownership records.
 
 ```bash
 ./experiments/collect.py \
@@ -62,6 +67,8 @@ BPF diagnostic phase adds a **60-second Cilium CLI setup delay** so Ready Pod
 identities can be discovered and both host agents attached before traffic.
 This is lifecycle time, not measured test duration. Both host BPF controls have
 the same delay. The baseline host mode retains its usual startup behavior.
+For a latency-only comparison, add `--test-type rr` to the collection command;
+this omits the two throughput workloads and their repeated setup delays.
 
 Use existing aggregation for completed attempts, preserving each mode:
 
@@ -87,13 +94,34 @@ Selected mode actions must carry traffic on all four attachments. The runner
 refuses a passed result without those counters. It refuses existing classic
 filters or TCX on the selected host ports and never replaces Cilium programs.
 
-Guest results save actual endpoint-agent `cilium-dbg status --verbose` output.
-Both agents must report the requested **Host Routing: Legacy/BPF**; the ConfigMap
+Guest results save actual endpoint-agent `cilium-dbg status --output json` output.
+Both agents must report the requested **routing.intra-host-routing-mode** as
+**Legacy/BPF** and their inter-host mode as Native; the ConfigMap
 must match all prerequisites. Static custom routes are validated, and before/
 after `cs740vx` counters must show bidirectional activity on both endpoint VMs.
 Device activity alone is not an exact per-flow trace. Use a separate bounded
 kernel trace if claiming how many ordinary forwarding calls were eliminated.
 A configured flag alone is insufficient to claim stack bypass or a speedup.
+The pinned [Cilium 1.20 routing API](https://github.com/cilium/cilium/blob/v1.20.4/api/v1/models/routing.go)
+defines these JSON fields. This avoids depending on the text status layout,
+which now combines network and host routing on one line.
+
+For a separate instrumented path check on the prepared mode:
+
+```bash
+./experiments/forwarding_trace.py vm-vxlan-bpf-1450
+# Or, after preparing its matched control:
+./experiments/forwarding_trace.py vm-vxlan-bpf-legacy-1450
+```
+
+This optional utility uses the existing four-machine tracer with worker-1 as
+client and worker-2 as server. A 30-second RR case contains about 15 seconds of
+active tracing, armed after the diagnostic sampler observes netperf. Raw traces
+and CSV/JSON kernel observations report executed `ip_forward`, `br_forward`,
+VXLAN and vhost stages, including available probes with zero hits. It also accepts
+the host BPF pair and original custom MTU-1450 modes. It acquires the collection
+lock and is not included in the untraced collector. Tracing adds substantial
+overhead: its timings overlap and must not be pooled with primary measurements.
 
 Idle policy matters substantially for RR. The experiments do not silently add
 CPU latency QoS requests. Hold power policy, queues, masks, workload and endpoint

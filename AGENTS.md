@@ -69,6 +69,9 @@ interfaces, or select an experiment.
   Keep the controls distinct. Host mode multiple samples require diagnostics;
   all host BPF runs require Pod-only traffic. `forwarding-control.json` blocks
   normal runs/setup after an unverified cleanup. See `docs/experiments/bpf-forwarding.md`.
+  `experiments/forwarding_trace.py MODE` is an optional separate instrumented
+  RR check using the existing four-machine tracer and worker-1/worker-2 pair;
+  do not pool its measurements with untraced collection phases.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
