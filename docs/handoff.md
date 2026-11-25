@@ -10,7 +10,10 @@ that host VXLAN alone has poor stream scaling. Initial study is now setting up
 vm-vxlan-1450. Based on this result, `final_controls()` now adds matching queue
 controls for Cilium and per-VM VXLAN too, after the host affinity/reversal series,
 then restores the initial host mode. The same `--append-host-controls` command
-now appends 22 steps for a total of 44, not the earlier nine/31. Each extra mode
+now appends 26 steps for a total of 48, not the earlier nine/31. Separate
+one-sample profiles on restored one-queue Cilium/per-VM VXLAN and native routing
+provide comparisons to the host kernel profile; they add four steps including
+native setup and are excluded from ordinary performance averages. Each extra mode
 uses 3xmulti one-queue, 5xsingle+multi two-queue, 3xmulti restored, plus setup and
 reversible queue changes. This tests whether the queue benefit is generic across
 the tunnel paths. No contention/multi-VM scaling or Cilium tuning/Hubble profiles.

@@ -355,9 +355,10 @@ def report(directory, output, partial=False):
              'The bridge-backed native control assesses a different attachment from macvtap. Host VXLAN still changes the encapsulation location, packet format across virtio, and bridge forwarding arrangement. '
              'Do not subtract throughput differences and call them isolated bridge or encapsulation costs.', '',
              '## Profiling and drop evidence', '']
-    profile = measurements.get('host-1450-profile')
-    if profile:
-        for _, _, path in profile['phases']:
+    profile_phases = [(name, phase, path) for name, measurement in measurements.items()
+                      if measurement['step'].get('profile') for phase, _, path in measurement['phases']]
+    if profile_phases:
+        for profile_name, _, path in profile_phases:
             for raw in sorted(path.glob('*/samples.jsonl')):
                 for line in raw.open():
                     entry = json.loads(line)
@@ -365,9 +366,9 @@ def report(directory, output, partial=False):
                         original = entry.get('report', {}).get('output', '')
                         profile_dir = output / 'profiles'
                         profile_dir.mkdir(exist_ok=True)
-                        name = raw.parent.name + '-perf-report.txt'
+                        name = profile_name + '-' + raw.parent.name + '-perf-report.txt'
                         (profile_dir / name).write_text(original)
-                        text += [f'### {raw.parent.name}', '',
+                        text += [f'### {profile_name}: {raw.parent.name}', '',
                                  'Largest self-sample overheads after excluding named idle functions. Percentages use all CPU-clock samples, '
                                  'including idle time in the denominator; they are not percentages of one vhost thread or of busy time.', '',
                                  aggregate.table(['Self samples %', 'Command', 'Function'], profile_self_rows(original)[:15]), '',

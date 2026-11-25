@@ -54,7 +54,10 @@ The appended plan also repeats the queue intervention on Cilium VXLAN and
 per-VM VXLAN at inner MTU 1450: three one-queue multistream samples, five
 two-queue single/multistream samples, and three restored-queue multistream
 samples per mode. This distinguishes a general virtio/backend improvement from
-a benefit specific to the host tunnel. Finally it rebuilds host-vxlan-1450 with
+a benefit specific to the host tunnel. Separate one-sample profiles after each
+restored-queue check, plus a native-routing profile at Pod MTU 1450, provide kernel-path references
+for the host profile; their performance is excluded from the main averages.
+Finally it rebuilds host-vxlan-1450 with
 the original one-queue configuration. These are queue controls for one worker
 pair, not multi-VM contention/scaling tests.
 

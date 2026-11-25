@@ -56,9 +56,15 @@ def final_controls():
             ('two-queue-control', 'measurement', {'samples': 5, 'test_type': 'throughput'}),
             ('restore-one-queue', 'queues', {'restore': True}),
             ('restored-queue-control', 'measurement', {'samples': 3, 'test_type': 'multi'}),
+            ('profile-control', 'measurement', {'samples': 1, 'test_type': 'multi', 'profile': True}),
         ):
             steps.append(dict(name=mode + '-' + suffix, kind=kind, mode=mode,
                               status='pending', attempts=[], **settings))
+    steps.extend([
+        dict(name='prepare-direct-1450-profile', kind='setup', mode='direct-1450', status='pending', attempts=[]),
+        dict(name='direct-1450-profile-control', kind='measurement', mode='direct-1450', status='pending', attempts=[],
+             samples=1, test_type='multi', profile=True),
+    ])
     steps.append(dict(name='restore-initial-host-mode', kind='setup', mode='host-vxlan-1450',
                       status='pending', attempts=[]))
     return steps
