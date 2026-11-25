@@ -60,6 +60,13 @@ def validate_forwarding(data, mode):
             raise ValueError(f'Guest forwarding profile mismatch: {key} must be {value}')
 
 
+def validate_runtime_routing(status, mode):
+    wanted = 'Legacy' if forwarding_profile(mode) == 'bpf-legacy' else 'BPF'
+    routing = status.get('routing', {})
+    if routing.get('intra-host-routing-mode') != wanted or routing.get('inter-host-routing-mode') != 'Native':
+        raise ValueError(f'Active Cilium routing must be Native / {wanted}; got {routing}')
+
+
 def cpu_counts(text):
     values = next(line for line in text.splitlines() if line.startswith('cpu ')).split()[1:]
     # guest and guest_nice are already included in user/nice, so exclude them.
@@ -232,17 +239,17 @@ def main():
                 ['-n','kube-system','get','daemonsets','-o','json']))
             if any(d['metadata']['name'] == 'kube-proxy' for d in proxy_sets['items']):
                 raise ValueError('Guest BPF profiles require a fresh setup without the kube-proxy DaemonSet')
-            wanted = 'Legacy' if forwarding_profile(args.mode) == 'bpf-legacy' else 'BPF'
             for name in (args.client, args.server):
                 pods = json.loads(remote(ssh_config, controller, KUBECTL + ['-n', 'kube-system', 'get',
                      'pods', '-l', 'k8s-app=cilium', '--field-selector', 'spec.nodeName='+name, '-o', 'json']))
                 if len(pods['items']) != 1:raise ValueError('Cannot identify the endpoint Cilium agent')
                 pod = pods['items'][0]['metadata']['name']
-                statuses[name] = remote(ssh_config, controller, KUBECTL + ['-n','kube-system','exec',pod,
-                        '--','cilium-dbg','status','--verbose'])
-                if not re.search(r'Host Routing:\s*'+wanted+r'\b', statuses[name]):
-                    raise ValueError(f'{name}: active Host Routing is not {wanted}; configuration alone is insufficient')
-            save_json(output/'host-routing-status.json', statuses)
+                raw = remote(ssh_config, controller, KUBECTL + ['-n','kube-system','exec',pod,
+                        '--','cilium-dbg','status','--output','json'])
+                (output/(name+'-cilium-status.json')).write_text(raw)
+                statuses[name] = json.loads(raw)
+                save_json(output/'host-routing-status.json', statuses)
+                validate_runtime_routing(statuses[name], args.mode)
         (output / 'cilium-version.txt').write_text(remote(ssh_config, controller, CILIUM + ['version']))
         (output / 'cilium-status.txt').write_text(remote(ssh_config, controller, CILIUM + ['status', '--wait']))
         targets = {name: name for name in (args.client, args.server)}

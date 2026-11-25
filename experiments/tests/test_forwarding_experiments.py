@@ -42,6 +42,16 @@ class ForwardingExperimentTests(unittest.TestCase):
             broken=dict(data);broken.pop(key)
             with self.assertRaises(ValueError):runner.validate_forwarding(broken,'vm-vxlan-bpf-1450')
 
+    def test_runtime_routing_uses_pinned_json_api_and_rejects_fallback(self):
+        status={'routing':{'inter-host-routing-mode':'Native','intra-host-routing-mode':'Legacy'}}
+        runner.validate_runtime_routing(status,'vm-vxlan-bpf-legacy-1450')
+        with self.assertRaisesRegex(ValueError,'Native / BPF'):
+            runner.validate_runtime_routing(status,'vm-vxlan-bpf-1450')
+        status['routing']['intra-host-routing-mode']='BPF'
+        runner.validate_runtime_routing(status,'vm-vxlan-bpf-1450')
+        status['routing']['inter-host-routing-mode']='Tunnel'
+        with self.assertRaises(ValueError):runner.validate_runtime_routing(status,'vm-vxlan-bpf-1450')
+
     def test_only_ready_unique_nonhost_benchmark_endpoints_are_selected(self):
         def pod(node,ip,ready=True,host=False):
             return {'spec':{'nodeName':node,'hostNetwork':host},
