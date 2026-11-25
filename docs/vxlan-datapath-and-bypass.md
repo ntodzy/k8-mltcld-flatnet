@@ -1,8 +1,10 @@
 # VXLAN packet paths and bypass options
 
 Reference recorded November 24, 2026. This describes the project's current
-Cilium 1.20.4 configuration and possible additional experiments. The TC/eBPF,
-XDP, and DPDK prototypes discussed below have not been implemented.
+Cilium 1.20.4 configuration and possible additional experiments. A subsequent
+[isolated TC/eBPF forwarding prototype](vxlan-latency-and-optimization.md) now
+exists; it retains Linux VXLAN and has no Cilium integration. The XDP, DPDK and
+production hypervisor bridge replacements discussed below remain proposals.
 
 ## Main conclusion
 

@@ -1,5 +1,27 @@
 # Work handoff
 
+## Completed optional BPF prototype (November 25)
+
+User requested the CPU idle/optimization breakdown in its own file and a
+noncritical prototype. Both are complete: `docs/vxlan-latency-and-optimization.md`
+and `experiments/vxlan_bpf_lab.py --host cs740-node1-jump`.
+The prototype is restricted to four disposable namespaces, never real Cilium
+devices. It models an L3 forwarding shortcut retaining Linux VXLAN, not a host
+bridge replacement or completed Cilium integration. Private per-attachment maps
+select static prefixes/ifindices/MACs and count redirects/fallbacks/drops.
+It does not preserve Cilium policy/identity; do not deploy it to the cluster.
+
+Final live correctness run passed:
+`results/vxlan-bpf-lab-20261125T164717.298390Z/report.json`.
+Baseline ping passed, disabling forwarding blocked delivery, four BPF programs
+restored bidirectional full-size DF traffic with forwarding disabled, TTL checks
+passed, 1,000 TCP exchanges passed, and ordinary forwarding recovered on detach.
+Post-run audit in the same directory verifies no owned namespaces/programs/maps,
+unchanged base configuration, active host-vxlan-1450. No package or idle-policy
+changes. All 98 repository tests pass. No comparable performance gain is claimed.
+Initial local snapshot b101632; final implementation snapshot follows in Git.
+Nothing pushed. No new cluster experiment is running or required for this task.
+
 ## Completed latency-isolation follow-up (November 25)
 
 The requested isolation study is complete. Do not restart or append controls.

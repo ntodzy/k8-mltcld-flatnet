@@ -1,5 +1,10 @@
 # Networking Experiment Suite
 
+The CPU idle explanation and optional forwarding prototype are documented
+separately in [VXLAN latency and optimization](docs/vxlan-latency-and-optimization.md).
+The prototype is a validated isolated correctness lab; it adds no performance
+samples to the completed study below.
+
 ## Latency isolation follow-up: matched paths and kernel observations
 
 The follow-up isolates a measurable marginal cost for each custom tunnel while holding its VM attachment and cluster configuration fixed. All five paired differences were positive: the custom VM path added **224 ±47 µs**, and the custom host path added **257 ±118 µs**, to mean TCP request/response latency. These are round-trip transaction differences, not one-way wire delays or an intrinsic cost of writing a VXLAN header. Our scripts configure Linux VXLAN devices; they do not implement a separate userspace packet encoder. Cilium and both custom deployments use the Linux VXLAN routines, with different forwarding integration and metadata.

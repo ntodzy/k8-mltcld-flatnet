@@ -55,6 +55,11 @@ interfaces, or select an experiment.
   temporary bypass routes; 242 remains the custom tunnel route protocol.
   Restore the tunnel path before changing modes. Keep instrumented timing runs
   separate from primary latency pairs; inclusive probe durations are not additive.
+- `experiments/vxlan_bpf_lab.py --host ALIAS`: optional TC redirect correctness
+  prototype in disposable namespaces on a configured hypervisor. Never attach
+  its programs to Cilium-managed interfaces. It shares the collection lock,
+  retains Linux VXLAN, and produces no comparable cluster performance samples.
+  See `docs/vxlan-latency-and-optimization.md` for limits and integration work.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
