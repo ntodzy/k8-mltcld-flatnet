@@ -5,7 +5,7 @@
   gather_facts: false
   tasks:
     - name: Reconcile host macvtap interfaces for direct attachment modes
-      when: experiment_mode != 'host-vxlan'
+      when: experiment_mode not in ['host-vxlan', 'host-vxlan-1450']
       block:
         - name: Install the macvtap MTU helper
           ansible.builtin.copy:
@@ -67,5 +67,5 @@
           fi
           ip link delete cs740br
         fi
-      when: experiment_mode != 'host-vxlan'
+      when: experiment_mode not in ['host-vxlan', 'host-vxlan-1450']
       changed_when: true

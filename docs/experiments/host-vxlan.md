@@ -5,6 +5,9 @@ Each hypervisor has a Linux bridge (`cs740br`) connected to a VXLAN interface
 Cilium uses native routing at MTU 1500; the hypervisor encapsulates frames
 between physical hosts, sharing the tunnel across its VMs.
 
+For the same implementation at inner MTU 1450, use [host-vxlan-1450](host-vxlan-1450.md)
+and the [matched comparison](matched-vxlan.md).
+
 ## Reset and set up
 
 Run from the repository root with the existing CloudLab reservation, deployment

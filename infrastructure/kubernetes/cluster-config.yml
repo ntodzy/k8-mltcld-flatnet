@@ -15,3 +15,9 @@ cilium_cli_version: v0.20.1
 cilium_network_mode: vxlan
 helm_version: v4.3.1
 
+
+# The custom 1450 variants keep inner packets equal to Cilium VXLAN while
+# retaining a 1500-byte outer transport path.
+cilium_vm_vxlan_modes: [vm-vxlan, vm-vxlan-1450]
+cilium_host_vxlan_modes: [host-vxlan, host-vxlan-1450]
+cilium_inner_mtu: "{{ 1450 if cilium_network_mode in ['direct-1450', 'vm-vxlan-1450', 'host-vxlan-1450'] else 1500 }}"

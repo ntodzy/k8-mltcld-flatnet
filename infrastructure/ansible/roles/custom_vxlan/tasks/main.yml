@@ -12,23 +12,25 @@
   when: custom_vxlan_service.stat.exists
 
 - name: Configure VM-managed VXLAN
-  when: cilium_network_mode == 'vm-vxlan'
+  when: cilium_network_mode in cilium_vm_vxlan_modes
   block:
-    - name: Require a small topology and a jumbo-capable guest underlay
+    - name: Inspect the guest underlay for the selected inner MTU
       ansible.builtin.command: ip -j link show dev experiment
       register: custom_vxlan_link
       changed_when: false
 
-    - name: Verify native MTU fits inside VXLAN
+    - name: Verify the inner MTU plus VXLAN headers fits on the underlay
       ansible.builtin.assert:
         that:
-          - (custom_vxlan_link.stdout | from_json)[0].mtu | int >= 1550
+          - (custom_vxlan_link.stdout | from_json)[0].mtu | int >= (cilium_inner_mtu | int + 50)
           - groups['virtual_machines'] | length <= 254
-        fail_msg: VM VXLAN requires experiment MTU >= 1550 and at most 254 nodes.
+        fail_msg: >-
+          VM VXLAN requires experiment MTU >= {{ cilium_inner_mtu | int + 50 }}
+          and at most 254 nodes.
 
     - name: Verify the underlay path carries a full VXLAN frame without fragmentation
       ansible.builtin.command:
-        argv: [ping, -n, -I, experiment, -M, do, -s, '1522', -c, '1', -W, '3', "{{ hostvars[item].kubernetes_node_ip }}"]
+        argv: [ping, -n, -I, experiment, -M, do, -s, '{{ cilium_inner_mtu | int + 50 - 28 }}', -c, '1', -W, '3', "{{ hostvars[item].kubernetes_node_ip }}"]
       loop: "{{ groups['virtual_machines'] | difference([inventory_hostname]) }}"
       changed_when: false
 

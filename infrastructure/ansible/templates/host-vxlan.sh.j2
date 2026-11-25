@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+modprobe vxlan
+if ! ip link show dev cs740br >/dev/null 2>&1; then
+  ip link add cs740br type bridge
+fi
+if ! ip link show dev cs740hvx >/dev/null 2>&1; then
+  ip link add cs740hvx type vxlan id 740 local {{ vxlan_underlay_ipv4 | quote }} dev {{ vxlan_underlay_interface | quote }} dstport 4789 nolearning
+fi
+ip link set cs740br mtu {{ host_vxlan_inner_mtu }} up
+ip link set cs740hvx mtu {{ host_vxlan_inner_mtu }} master cs740br up
+# Rebuild only this experiment interface's flood destinations.
+bridge fdb flush dev cs740hvx self
+{% for peer in groups['hypervisors'] if peer != inventory_hostname %}
+bridge fdb append 00:00:00:00:00:00 dev cs740hvx dst {{ hostvars[peer].vxlan_underlay_ipv4 | quote }} self permanent
+{% endfor %}

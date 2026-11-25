@@ -6,7 +6,25 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED = ROOT / 'infrastructure/generated'
-MODES = ('vxlan', 'native', 'vm-local', 'direct-1450', 'vm-vxlan', 'host-vxlan')
+VM_VXLAN_MODES = ('vm-vxlan', 'vm-vxlan-1450')
+HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450')
+# Inner IP MTU, guest transport NIC MTU, physical MTU, Cilium MTU override.
+# A guest doing encapsulation needs 50 extra bytes on its transport NIC.
+MTU_PROFILES = {
+    'vxlan': (1450, 1500, 1500, 0),
+    'native': (1500, 1500, 1500, 0),
+    'vm-local': (1500, 1500, 1500, 0),
+    'direct-1450': (1450, 1500, 1500, 1450),
+    'vm-vxlan': (1500, 1550, 1550, 1500),
+    'host-vxlan': (1500, 1500, 1550, 1500),
+    'vm-vxlan-1450': (1450, 1500, 1500, 1450),
+    'host-vxlan-1450': (1450, 1450, 1500, 1450),
+}
+MODES = tuple(MTU_PROFILES)
+
+
+def mtu_profile(mode):
+    return dict(zip(('inner_mtu', 'guest_mtu', 'physical_mtu', 'cilium_mtu'), MTU_PROFILES[mode]))
 
 
 def guests(path):

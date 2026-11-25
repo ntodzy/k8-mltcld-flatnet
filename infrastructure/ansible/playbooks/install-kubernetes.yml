@@ -40,7 +40,7 @@
         that:
           - groups.get('kubernetes_controllers', []) | length == 1
           - groups.get('kubernetes_workers', []) | length >= 1
-          - cilium_network_mode in ['vxlan', 'native', 'direct-1450', 'vm-vxlan', 'host-vxlan']
+          - cilium_network_mode in ['vxlan', 'native', 'direct-1450', 'vm-vxlan', 'host-vxlan', 'vm-vxlan-1450', 'host-vxlan-1450']
           - >-
             groups['virtual_machines'] | map('extract', hostvars, 'kubernetes_node_ip') |
             list | unique | length == groups['virtual_machines'] | length

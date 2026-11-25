@@ -43,14 +43,14 @@
           #!/usr/bin/env bash
           set -Eeuo pipefail
           if [[ "${1:-}" == down ]]; then
-          {% if experiment_mode == 'host-vxlan' %}
+          {% if experiment_mode in ['host-vxlan', 'host-vxlan-1450'] %}
             ip address del {{ vxlan_underlay_ipv4 | quote }}/{{ experiment_underlay_prefix | int }} dev {{ vxlan_underlay_interface | quote }} 2>/dev/null || true
           {% endif %}
             exit 0
           fi
           [[ "${1:-}" == up ]] || exit 2
           ip link set dev {{ vxlan_underlay_interface | quote }} mtu {{ experiment_underlay_mtu | int }} up
-          {% if experiment_mode == 'host-vxlan' %}
+          {% if experiment_mode in ['host-vxlan', 'host-vxlan-1450'] %}
           ip address replace {{ vxlan_underlay_ipv4 | quote }}/{{ experiment_underlay_prefix | int }} dev {{ vxlan_underlay_interface | quote }}
           {% endif %}
 

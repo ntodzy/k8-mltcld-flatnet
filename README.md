@@ -29,6 +29,8 @@ SSH jump-host configuration are reused; no SSH key setup is needed.
 | [Direct MTU 1450](docs/experiments/direct-1450.md) | Isolate reduced-MTU cost without encapsulation |
 | [Per-VM VXLAN](docs/experiments/vm-vxlan.md) | Linux VXLAN inside each VM, inner MTU 1500 |
 | [Hypervisor VXLAN](docs/experiments/host-vxlan.md) | Shared Linux VXLAN on each physical host, inner MTU 1500 |
+| [Per-VM VXLAN MTU 1450](docs/experiments/vm-vxlan-1450.md) | Custom guest tunnel at the same inner MTU as Cilium VXLAN |
+| [Hypervisor VXLAN MTU 1450](docs/experiments/host-vxlan-1450.md) | Shared host tunnel at the same inner MTU as Cilium VXLAN |
 
 For example:
 
@@ -42,8 +44,23 @@ The runner uses `cilium connectivity perf` on the controller and saves JSON
 reports, console output, placement/configuration, and whole-run CPU snapshots
 under `results/`. See [runner options and result interpretation](docs/experiments/runner.md).
 
+For final data collection across every mode:
+
+```bash
+./experiments/collect.py --background
+```
+
+For a comparison of the three VXLAN implementations at inner MTU 1450, see
+[the matched comparison](docs/experiments/matched-vxlan.md).
+
+See [collection options, progress, and resume](docs/experiments/collection.md).
+This resets the cluster between modes and saves all results together.
+
 ## References
 
+- [VXLAN packet paths and bypass options](docs/vxlan-datapath-and-bypass.md)
+- [Collect CPU, queue, offload, and TCP diagnostics](docs/experiments/diagnostics.md)
+- [Aggregate attempts into tables and graphs](docs/experiments/aggregation.md)
 - [Hypervisor setup and NIC tuning](docs/hypervisors.md)
 - [Infrastructure deployment and networking](docs/infrastructure.md)
 - [Research abstract and schedule](docs/project-plan.md)
@@ -53,4 +70,5 @@ The deployment controller needs Python 3.10+, Bash, OpenSSH, jq, Ansible Core,
 and Terraform 1.5+ (1.7+ for mock-provider tests). The scripts assume the VMs
 have already been provisioned with `infrastructure/deploy.sh apply` and that
 `infrastructure/config.json` retains the original direct experiment NIC
-attachments. Custom VXLAN also requires a CloudLab LAN supporting MTU 1550.
+attachments. The original custom VXLAN modes with inner MTU 1500 require a CloudLab LAN
+supporting MTU 1550; the new inner-MTU-1450 modes use a 1500-byte underlay.

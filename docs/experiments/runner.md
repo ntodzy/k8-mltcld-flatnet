@@ -1,5 +1,7 @@
 # Experiment runner
 
+For all modes in one command, use [final data collection](collection.md).
+
 Run from the repository root. The scripts reuse
 `infrastructure/generated/ssh_config` and `guest_inventory.json`; the Cilium
 CLI and kubeconfig already installed on the controller execute the tests.
@@ -40,8 +42,8 @@ To preview setup without changes or SSH:
 Omit `--reset` only when the guest cluster has already been reset. Setup checks
 for existing cluster membership before changing networking in that case.
 It auto-approves the VM reconciliation described by the generated config.
-Physical switches/firewalls remain externally configured. Custom VXLAN needs
-MTU 1550 end to end; ordinary profiles restore MTU 1500.
+Physical switches/firewalls remain externally configured. The original custom VXLAN modes need MTU 1550 end to end. Their new
+`*-vxlan-1450` variants use inner MTU 1450 and physical MTU 1500.
 
 ## Measure
 
@@ -65,6 +67,13 @@ prevents overlapping performance commands from this runner.
 
 Additional options:
 
+- `--diagnostics`: isolate each sample, network path, and test type and monitor
+  endpoint VMs/hypervisors. See [diagnostic collection](diagnostics.md).
+- `--test-type all|rr|single|multi`, `--network both|pod|host`: select workloads.
+- `--profile`: optional system-wide perf capture in a separate diagnostic run;
+  requires `--diagnostics` and existing usable perf on each monitored machine.
+- `--pod-only`: exclude host-network controls for matching Pod workloads
+  across tunnel implementations; unavailable for the `vm-local` host baseline.
 - `--same-node`: also measure clients on the server VM. Cilium's “same-node”
   means the same Kubernetes VM, not two VMs sharing a hypervisor.
 - `--output PATH`: use a new directory instead of the timestamped default.
@@ -94,7 +103,9 @@ metrics, not Prometheus counters. CPU samples cover the entire test invocation,
 including setup and all test cases; they are average whole-machine busy
 percentages, not isolated encapsulation CPU or per-test measurements. Keep
 other workloads quiet and compare matching placement, MTU, samples, and streams.
-For rigorous per-test CPU attribution, collect synchronized profiling separately.
+For approximate per-test attribution, use the opt-in diagnostic mode. It records
+an observed workload window and its alignment limits; heavy profiling remains
+a separate diagnostic run.
 
 The runner removes its own namespace and remote report directory after saving
 results. On failure it keeps available local logs and failure metadata. If report collection

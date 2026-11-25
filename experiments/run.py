@@ -10,7 +10,7 @@ import subprocess
 import tarfile
 import uuid
 
-from common import GENERATED, MODES, ROOT, guests, remote, save_json, ssh_command
+from common import GENERATED, MODES, ROOT, VM_VXLAN_MODES, guests, remote, save_json, ssh_command, mtu_profile
 
 KUBECTL = ['sudo', '-n', 'kubectl', '--kubeconfig=/etc/kubernetes/admin.conf']
 CILIUM = ['sudo', '-n', '/usr/local/bin/cilium', '--kubeconfig=/etc/kubernetes/admin.conf']
@@ -30,14 +30,19 @@ def select_pair(hosts, mode, client, server):
 
 
 def perf_arguments(args, namespace, report_dir, client_hostname, server_hostname):
+    test = getattr(args, 'test_type', 'all')
+    network = getattr(args, 'network', 'both')
     return [
         'connectivity', 'perf', '--duration', f'{args.duration}s',
         '--samples', str(args.samples), '--streams', str(args.streams),
         '--node-selector-client', f'kubernetes.io/hostname={client_hostname}',
         '--node-selector-server', f'kubernetes.io/hostname={server_hostname}',
         '--same-node=' + str(args.same_node).lower(), '--other-node=true',
-        '--host-net=true', '--pod-net=' + str(args.mode != 'vm-local').lower(),
-        '--rr=true', '--throughput=true', '--throughput-multi=true',
+        '--host-net=' + str(not args.pod_only and network != 'pod').lower(),
+        '--pod-net=' + str(args.mode != 'vm-local' and network != 'host').lower(),
+        '--rr=' + str(test in ('all', 'rr')).lower(),
+        '--throughput=' + str(test in ('all', 'single')).lower(),
+        '--throughput-multi=' + str(test in ('all', 'multi')).lower(),
         '--test-namespace', namespace,
         '--namespace-labels', 'pod-security.kubernetes.io/enforce=privileged',
         '--report-dir', report_dir,
@@ -91,10 +96,25 @@ def main():
     parser.add_argument('--duration', type=positive, default=30, help='Seconds per test/sample (default: 30)')
     parser.add_argument('--samples', type=positive, default=5)
     parser.add_argument('--streams', type=positive, default=4)
+    parser.add_argument('--pod-only', action='store_true', help='Measure Pod traffic only, excluding host-network controls')
     parser.add_argument('--same-node', action='store_true', help='Also measure the single-VM path on the server VM')
     parser.add_argument('--output', type=Path, help='New result directory; defaults to results/MODE-UTC_TIMESTAMP')
     parser.add_argument('--dry-run', action='store_true', help='Validate placement and print the command without SSH')
+    parser.add_argument('--test-type', choices=('all', 'rr', 'single', 'multi'), default='all')
+    parser.add_argument('--network', choices=('both', 'pod', 'host'), default='both')
+    parser.add_argument('--diagnostics', action='store_true', help='Separate every sample/path/test and monitor endpoint VMs and hypervisors')
+    parser.add_argument('--profile', action='store_true', help='Separate diagnostic run with system-wide perf profiling; requires --diagnostics')
     args = parser.parse_args()
+    if args.pod_only and args.mode == 'vm-local':
+        parser.error('vm-local is a host-network baseline and cannot use --pod-only')
+    if args.pod_only and args.network == 'host':
+        parser.error('--pod-only cannot use --network host')
+    if args.mode == 'vm-local' and args.network == 'pod':
+        parser.error('vm-local cannot use --network pod')
+    if args.profile and not args.diagnostics:
+        parser.error('--profile requires --diagnostics; use a separate run from final measurements')
+    if args.diagnostics and args.same_node:
+        parser.error('--diagnostics requires cross-VM tests; omit --same-node')
     hosts = guests(GENERATED / 'guest_inventory.json')
     select_pair(hosts, args.mode, args.client, args.server)
     controllers = [name for name, host in hosts.items() if host['cs740_role'] == 'controller']
@@ -105,6 +125,10 @@ def main():
     if not ssh_config.is_file():
         raise ValueError('Existing generated SSH config is missing; deploy the VMs first')
     namespace = 'cs740-perf-' + uuid.uuid4().hex[:10]
+    if args.diagnostics:
+        from diagnostics import run_diagnostics
+        run_diagnostics(args, hosts, ssh_config)
+        return
     if args.dry_run:
         command = CILIUM + perf_arguments(args, namespace, '/tmp/REPORTS', args.client, args.server)
         print(shlex.join(ssh_command(ssh_config, controller, command)))
@@ -121,8 +145,9 @@ def main():
         'placement': {name: {key: hosts[name][key] for key in ('hypervisor', 'experiment_ipv4')}
                       for name in (args.client, args.server)},
         'duration_seconds': args.duration, 'samples': args.samples, 'streams': args.streams,
-        'same_node': args.same_node, 'namespace': namespace + '-1',
-        'setup': active, 'status': 'running',
+        'same_node': args.same_node, 'pod_only': args.pod_only, 'namespace': namespace + '-1',
+        'test_type': args.test_type, 'network': args.network,
+        'setup': active, 'mtu_profile': mtu_profile(args.mode), 'status': 'running',
     }
     save_json(output / 'metadata.json', metadata)
     remote_dir = None
@@ -140,8 +165,8 @@ def main():
         save_json(output / 'cilium-config.json', config)
         data = config['data']
         expected_routing = 'tunnel' if args.mode == 'vxlan' else 'native'
-        expected_direct = 'false' if args.mode in ('vxlan', 'vm-vxlan') else 'true'
-        expected_mtu = 1450 if args.mode == 'direct-1450' else (1500 if args.mode in ('vm-vxlan', 'host-vxlan') else 0)
+        expected_direct = 'false' if args.mode == 'vxlan' or args.mode in VM_VXLAN_MODES else 'true'
+        expected_mtu = mtu_profile(args.mode)['cilium_mtu']
         if (data.get('routing-mode') != expected_routing or
                 data.get('auto-direct-node-routes') != expected_direct or
                 int(data.get('mtu', 0)) != expected_mtu):
@@ -225,5 +250,5 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, KeyError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
         raise SystemExit(f'Experiment failed: {error}')

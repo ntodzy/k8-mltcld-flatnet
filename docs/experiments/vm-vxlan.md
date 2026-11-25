@@ -5,6 +5,9 @@ Cilium uses native routing at MTU 1500. Each VM has a Linux VXLAN interface
 that interface. Static neighbor/FDB entries identify each peer VM's VTEP.
 Encapsulation CPU cost is paid inside the VMs.
 
+For the same implementation at inner MTU 1450, use [vm-vxlan-1450](vm-vxlan-1450.md)
+and the [matched comparison](matched-vxlan.md).
+
 ## Reset and set up
 
 Run from the repository root with the existing CloudLab reservation, deployment

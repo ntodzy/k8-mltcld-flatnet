@@ -105,6 +105,13 @@ VM name, which prevents identical private DHCP addresses on different libvirt
 networks from colliding. A successful infrastructure apply resets this local
 trust store because the managed VMs may have been recreated.
 
+Generated SSH defaults and Ansible connection options use
+`StrictHostKeyChecking=accept-new` and `BatchMode=yes`: first-contact keys are
+recorded without a prompt, while changed keys are rejected. These defaults must
+also cover management-IP connections, because Ansible targets those IPs rather
+than the named `Host` entries. `HostKeyAlias` selects the trust-store name; it
+does not make an IP connection match a named `Host` block.
+
 These generated files are ignored by Git. If the hypervisor SSH connection
 itself requires a jump host or other advanced SSH options, set
 that hypervisor's optional `libvirt_uri` to a `qemu+sshcmd://` URI that refers

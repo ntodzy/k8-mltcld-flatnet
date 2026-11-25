@@ -1,0 +1,79 @@
+---
+# All tasks run locally in a temporary directory, without installing packages.
+- name: Verify cluster setup recreates configuration directories after reset
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    node_tasks: "{{ lookup('file', '../ansible/roles/kubernetes_node/tasks/main.yml') | from_yaml }}"
+    reset_tasks: "{{ (lookup('file', '../ansible/playbooks/reset-kubernetes.yml') | from_yaml)[0]['tasks'] }}"
+    directory_tasks: >-
+      {{ node_tasks | selectattr('name', 'equalto',
+         'Recreate the Kubernetes configuration directory after reset') | list }}
+    cleanup_task: "{{ reset_tasks | selectattr('name', 'equalto', 'Remove persistent cluster and CNI state') | first }}"
+  tasks:
+    - name: Require explicit directory recreation and safe runtime cleanup
+      ansible.builtin.assert:
+        that:
+          - directory_tasks | length == 1
+          - directory_tasks[0]['ansible.builtin.file'].path == '/etc/kubernetes'
+          - directory_tasks[0]['ansible.builtin.file'].state == 'directory'
+          - directory_tasks[0]['ansible.builtin.file'].mode == '0755'
+          - directory_tasks[0].get('when', true) == true
+          - "'/etc/kubernetes' in cleanup_task.loop"
+          - "'/run/cilium' not in cleanup_task.loop"
+
+    - name: Create an isolated reset simulation
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: cs740-reset-reapply-
+      register: reset_test_directory
+
+    - name: Test reset and reapply without package reinstallation
+      block:
+        - name: Simulate the missing directory after reset
+          ansible.builtin.file:
+            path: '{{ reset_test_directory.path }}/etc/kubernetes'
+            state: absent
+
+        - name: Adapt only the destination and ownership for this local test
+          ansible.builtin.set_fact:
+            directory_arguments: >-
+              {{ directory_tasks[0]['ansible.builtin.file'] |
+                 combine({'path': reset_test_directory.path + '/etc/kubernetes',
+                          'owner': omit, 'group': omit}) }}
+
+        - name: Verify the test cannot target the real Kubernetes directory
+          ansible.builtin.assert:
+            that:
+              - directory_arguments.path.startswith(reset_test_directory.path + '/')
+
+        - name: Run the actual node role directory settings in isolation
+          ansible.builtin.file:
+            path: '{{ directory_arguments.path }}'
+            state: '{{ directory_arguments.state }}'
+            mode: '{{ directory_arguments.mode }}'
+
+        - name: Verify both controller and worker configs can now be written
+          ansible.builtin.copy:
+            dest: '{{ reset_test_directory.path }}/etc/kubernetes/{{ item }}'
+            content: "# kubeadm reset/reapply fixture\n"
+            mode: '0600'
+          loop: [kubeadm-init.yml, kubeadm-join.yml]
+
+        - name: Reapply directory settings
+          ansible.builtin.file:
+            path: '{{ directory_arguments.path }}'
+            state: '{{ directory_arguments.state }}'
+            mode: '{{ directory_arguments.mode }}'
+          register: directory_reapply
+
+        - name: Verify repeated setup is idempotent
+          ansible.builtin.assert:
+            that:
+              - not directory_reapply.changed
+      always:
+        - name: Remove test artifacts
+          ansible.builtin.file:
+            path: '{{ reset_test_directory.path }}'
+            state: absent

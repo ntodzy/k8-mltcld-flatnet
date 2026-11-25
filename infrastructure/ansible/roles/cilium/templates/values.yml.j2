@@ -9,13 +9,11 @@ autoDirectNodeRoutes: false
 # stack and install a direct route through the owning node on the shared L2.
 routingMode: native
 ipv4NativeRoutingCIDR: {{ kubernetes_pod_subnet }}
-autoDirectNodeRoutes: {{ 'false' if cilium_network_mode == 'vm-vxlan' else 'true' }}
+autoDirectNodeRoutes: {{ 'false' if cilium_network_mode in cilium_vm_vxlan_modes else 'true' }}
 {% endif %}
-devices: {{ 'experiment,cs740vx' if cilium_network_mode == 'vm-vxlan' else 'experiment' }}
-{% if cilium_network_mode == 'direct-1450' %}
-MTU: 1450
-{% elif cilium_network_mode in ['vm-vxlan', 'host-vxlan'] %}
-MTU: 1500
+devices: {{ 'experiment,cs740vx' if cilium_network_mode in cilium_vm_vxlan_modes else 'experiment' }}
+{% if cilium_network_mode == 'direct-1450' or cilium_network_mode in cilium_vm_vxlan_modes or cilium_network_mode in cilium_host_vxlan_modes %}
+MTU: {{ cilium_inner_mtu }}
 {% else %}
 MTU: 0
 {% endif %}

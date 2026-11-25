@@ -16,6 +16,14 @@
     experiment_interface.rc != 0 or
     ('inet ' + kubernetes_node_ip + '/') not in experiment_interface.stdout
 
+- name: Recreate the Kubernetes configuration directory after reset
+  ansible.builtin.file:
+    path: /etc/kubernetes
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Grow the root partition to the provisioned disk size
   ansible.builtin.command: growpart /dev/vda 1
   register: kubernetes_root_partition

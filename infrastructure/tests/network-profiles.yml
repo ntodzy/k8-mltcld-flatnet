@@ -27,18 +27,19 @@
             mode: '0600'
           vars:
             cilium_network_mode: '{{ item }}'
-          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan]
+          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan, vm-vxlan-1450, host-vxlan-1450]
         - name: Assert routing, MTU, and rollout behavior
           ansible.builtin.assert:
             that:
               - values.routingMode == ('tunnel' if item == 'vxlan' else 'native')
-              - values.autoDirectNodeRoutes == (item not in ['vxlan', 'vm-vxlan'])
-              - values.MTU == (1450 if item == 'direct-1450' else (1500 if item in ['vm-vxlan', 'host-vxlan'] else 0))
+              - values.autoDirectNodeRoutes == (item not in ['vxlan', 'vm-vxlan', 'vm-vxlan-1450'])
+              - values.MTU == (1450 if item in ['direct-1450', 'vm-vxlan-1450', 'host-vxlan-1450'] else (1500 if item in ['vm-vxlan', 'host-vxlan'] else 0))
+              - values.devices == ('experiment,cs740vx' if item in cilium_vm_vxlan_modes else 'experiment')
               - values.rollOutCiliumPods
               - values.k8sServiceHost == hostvars[groups['kubernetes_controllers'][0]].kubernetes_node_ip
           vars:
             values: "{{ lookup('file', profile_test_dir.path + '/' + item + '.yml') | from_yaml }}"
-          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan]
+          loop: [vxlan, native, direct-1450, vm-vxlan, host-vxlan, vm-vxlan-1450, host-vxlan-1450]
         - name: Construct Kubernetes node fixture
           ansible.builtin.set_fact:
             fixture_nodes: "{{ fixture_nodes | default([]) + [{'metadata': {'name': item}, 'spec': {'podCIDR': '10.244.' + (node_index | string) + '.0/24'}}] }}"
@@ -48,23 +49,56 @@
         - name: Render per-VM forwarding script
           ansible.builtin.template:
             src: ../ansible/roles/custom_vxlan/templates/vm-vxlan.sh.j2
-            dest: '{{ profile_test_dir.path }}/vm-vxlan.sh'
+            dest: '{{ profile_test_dir.path }}/{{ item }}.sh'
             mode: '0600'
           vars:
+            cilium_network_mode: '{{ item }}'
             custom_vxlan_nodes:
               stdout: "{{ {'items': fixture_nodes} | to_json }}"
+          loop: [vm-vxlan, vm-vxlan-1450]
         - name: Check generated shell syntax
           ansible.builtin.command:
-            argv: [bash, -n, '{{ profile_test_dir.path }}/vm-vxlan.sh']
+            argv: [bash, -n, '{{ profile_test_dir.path }}/{{ item }}.sh']
           changed_when: false
+          loop: [vm-vxlan, vm-vxlan-1450]
         - name: Verify every remote PodCIDR has a tunnel route
           ansible.builtin.assert:
             that:
               - script.count('ip route replace ') == groups['virtual_machines'] | length - 1
               - script.count('bridge fdb replace ') == groups['virtual_machines'] | length - 1
-              - "'mtu 1500 up' in script"
+              - "('mtu ' + ('1450' if item == 'vm-vxlan-1450' else '1500') + ' up') in script"
           vars:
-            script: "{{ lookup('file', profile_test_dir.path + '/vm-vxlan.sh') }}"
+            script: "{{ lookup('file', profile_test_dir.path + '/' + item + '.sh') }}"
+          loop: [vm-vxlan, vm-vxlan-1450]
+        - name: Define simulated hypervisors for host tunnel rendering
+          ansible.builtin.group_by:
+            key: hypervisors
+        - name: Define simulated hypervisor underlay endpoints
+          ansible.builtin.set_fact:
+            vxlan_underlay_ipv4: '{{ kubernetes_node_ip }}'
+            vxlan_underlay_interface: experiment
+        - name: Render both host tunnel MTUs
+          ansible.builtin.template:
+            src: ../ansible/templates/host-vxlan.sh.j2
+            dest: '{{ profile_test_dir.path }}/host-vxlan-{{ item }}.sh'
+            mode: '0600'
+          vars:
+            host_vxlan_inner_mtu: '{{ item }}'
+          loop: [1450, 1500]
+        - name: Check both host tunnel scripts
+          ansible.builtin.command:
+            argv: [bash, -n, '{{ profile_test_dir.path }}/host-vxlan-{{ item }}.sh']
+          changed_when: false
+          loop: [1450, 1500]
+        - name: Verify bridge and tunnel MTUs plus peer forwarding
+          ansible.builtin.assert:
+            that:
+              - "('cs740br mtu ' + (item | string) + ' up') in script"
+              - "('cs740hvx mtu ' + (item | string) + ' master') in script"
+              - script.count('bridge fdb append ') == groups['hypervisors'] | length - 1
+          vars:
+            script: "{{ lookup('file', profile_test_dir.path + '/host-vxlan-' + (item | string) + '.sh') }}"
+          loop: [1450, 1500]
       always:
         - name: Remove temporary artifacts
           ansible.builtin.file:

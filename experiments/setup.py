@@ -10,7 +10,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from common import GENERATED, MODES, ROOT, guests, remote, save_json
+from common import GENERATED, MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile
 
 
 def deployment_config(source, mode, config_dir):
@@ -23,9 +23,9 @@ def deployment_config(source, mode, config_dir):
         if host['network']['mode'] != 'direct':
             raise ValueError('Base config must use direct experiment NIC attachments; '
                              'keep bridge changes in the generated experiment config.')
-        host['network']['mtu'] = 1550 if mode == 'vm-vxlan' else 1500
-        if mode == 'host-vxlan':
-            host['network'] = {'mode': 'bridge', 'source': 'cs740br', 'mtu': 1500}
+        host['network']['mtu'] = mtu_profile(mode)['guest_mtu']
+        if mode in HOST_VXLAN_MODES:
+            host['network'] = {'mode': 'bridge', 'source': 'cs740br', 'mtu': mtu_profile(mode)['guest_mtu']}
     return config
 
 
@@ -50,8 +50,9 @@ def hypervisor_inventory(config, mode, ssh_config, subnet):
         }
     return {'all': {'children': {'hypervisors': {'hosts': hosts}}, 'vars': {
         'experiment_mode': mode,
-        'experiment_underlay_mtu': 1550 if mode in ('vm-vxlan', 'host-vxlan') else 1500,
-        'experiment_guest_mtu': 1550 if mode == 'vm-vxlan' else 1500,
+        'experiment_underlay_mtu': mtu_profile(mode)['physical_mtu'],
+        'experiment_inner_mtu': mtu_profile(mode)['inner_mtu'],
+        'experiment_guest_mtu': mtu_profile(mode)['guest_mtu'],
         'experiment_underlay_prefix': subnet.prefixlen,
     }}}
 
@@ -73,7 +74,7 @@ def main():
     host_inventory = hypervisor_inventory(source, args.mode, ssh_config, args.underlay_subnet)
     if not ssh_config.is_file() or not inventory.is_file():
         parser.error('Deploy the VMs first; existing generated SSH config and guest inventory are required')
-    if args.mode == 'host-vxlan' and len(source['hypervisors']) < 2:
+    if args.mode in HOST_VXLAN_MODES and len(source['hypervisors']) < 2:
         parser.error('host-vxlan requires at least two hypervisors')
     host_file = GENERATED / 'experiment_hypervisors.json'
     config_file = GENERATED / 'experiment_config.json'
@@ -83,7 +84,7 @@ def main():
     if args.reset:
         commands.append([str(ROOT / 'infrastructure/cluster.sh'), 'reset'])
     commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'experiment-underlay.yml')])
-    if args.mode == 'host-vxlan':
+    if args.mode in HOST_VXLAN_MODES:
         commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'host-vxlan.yml')])
     commands += [
         [str(ROOT / 'infrastructure/deploy.sh'), '--config', str(config_file), '--auto-approve', 'apply'],
@@ -112,6 +113,7 @@ def main():
         'mode': args.mode, 'cluster_mode': cluster_mode,
         'physical_mtu': host_inventory['all']['vars']['experiment_underlay_mtu'],
         'guest_mtu': host_inventory['all']['vars']['experiment_guest_mtu'],
+        'inner_mtu': host_inventory['all']['vars']['experiment_inner_mtu'],
     })
     print(f'Ready: run experiments/run.py {args.mode} --client VM --server VM')
 

@@ -47,12 +47,13 @@
         - /etc/cni/net.d
         - /var/lib/cni
         - /var/lib/cilium
-        - /run/cilium
         - /etc/kubernetes
         - '/home/{{ ansible_user }}/.kube/config'
         - /etc/systemd/system/cs740-vxlan.service
         - /usr/local/sbin/cs740-vxlan
 
-    - name: Reboot to clear kernel routes, BPF state, interfaces, and firewall rules
+    # /run/cilium can contain mounted cgroupfs. Do not recurse into that virtual
+    # filesystem: reboot clears /run and its mounts along with the kernel state.
+    - name: Reboot to clear runtime mounts, routes, BPF state, interfaces, and firewall rules
       ansible.builtin.reboot:
         reboot_timeout: 600

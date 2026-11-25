@@ -36,8 +36,8 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(BASE, original)
                 self.assertEqual(config['ssh']['private_key_file'], str(Path('~/.ssh/id_ed25519').expanduser()))
                 network = config['hypervisors'][0]['network']
-                self.assertEqual(network['mode'], 'bridge' if mode == 'host-vxlan' else 'direct')
-                self.assertEqual(network['mtu'], 1550 if mode == 'vm-vxlan' else 1500)
+                self.assertEqual(network['mode'], 'bridge' if mode in ('host-vxlan', 'host-vxlan-1450') else 'direct')
+                self.assertEqual(network['mtu'], 1550 if mode == 'vm-vxlan' else (1450 if mode == 'host-vxlan-1450' else 1500))
 
     def test_relative_credentials_keep_original_config_location(self):
         source = copy.deepcopy(BASE)
@@ -71,7 +71,7 @@ class RunnerTests(unittest.TestCase):
             runner.select_pair(HOSTS, 'native', 'control-1', 'worker-2')
 
     def test_perf_flags_pin_host_baseline_and_cross_host_pod_tests(self):
-        args = argparse.Namespace(mode='vm-local', duration=30, samples=5, streams=4, same_node=False)
+        args = argparse.Namespace(mode='vm-local', duration=30, samples=5, streams=4, same_node=False, pod_only=False)
         argv = runner.perf_arguments(args, 'cs740-perf-test', '/tmp/reports', 'worker-2', 'worker-3')
         self.assertIn('--same-node=false', argv)
         self.assertIn('--other-node=true', argv)

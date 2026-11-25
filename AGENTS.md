@@ -5,7 +5,9 @@
 This repository contains the configuration, automation, and measurements for the
 CS740 networking research project. It compares Cilium VXLAN, native routing,
 and custom VXLAN implementations using Kubernetes VMs across CloudLab hosts.
-Read `README.md` first, then the relevant guide under `docs/`.
+Read `README.md` first, then the relevant guide under `docs/`. The latest
+continuation notes are in `docs/handoff.md`; packet-path and bypass research
+is in `docs/vxlan-datapath-and-bypass.md`.
 
 ## User workflow
 
@@ -21,9 +23,20 @@ interfaces, or select an experiment.
   the selected experiment, including NIC attachments and MTUs.
 - `experiments/run.py MODE --client VM --server VM`: run Cilium CLI performance
   tests and collect reports.
+- Add `--diagnostics` to isolate every sample/path/test and monitor both endpoint
+  VMs and hypervisors. `experiments/diagnostics.py` coordinates remote
+  `diagnostic_agent.py` samplers. `--profile` adds perf only in a separate
+  diagnostic run. See `docs/experiments/diagnostics.md` for timing/scope limits.
+- `experiments/collect.py --background`: collect all eight modes with consistent
+  parameters and endpoint placement, cluster resets, host NIC audits, a metrics
+  CSV, and resumable per-mode attempts. Respect its shared collection lock.
 - `experiments/hypervisors.py`: optional QEMU/KVM preparation, host NIC tuning,
   audits, and restoration of saved NIC settings. This is separate from the
   hostname configuration wizard.
+- `experiments/aggregate.py ATTEMPT [ATTEMPT ...]`: read-only aggregation of
+  saved measurements into Markdown/CSV/JSON and Matplotlib SVG/PNG figures.
+  Preserve phase/sample identity; do not double-count mirrored reports or
+  host-wide counters repeated in per-core CSV rows. See `docs/experiments/aggregation.md`.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
@@ -40,6 +53,10 @@ Hypervisor SSH access and guest credentials are already configured. Reuse the
 existing key paths and generated SSH configuration; do not regenerate keys or
 ask the user to reinstall them as a routine setup step. Guests are reached
 through their hypervisor jump hosts. Preserve management-network connectivity.
+Ansible targets management IPs, so noninteractive SSH host-key policy must cover
+IP connections as well as named hosts. `HostKeyAlias` does not select a `Host`
+block. Keep `accept-new` and batch mode in generated defaults/connection options;
+retain rejection of changed keys and do not clear trust to fix prompt failures.
 
 Local configs, backups, generated inventories/SSH files, Terraform state, and
 measurement output must remain outside version control. Do not overwrite
@@ -69,11 +86,21 @@ The experiment modes are:
 | `direct-1450` | Native routing, Pod MTU 1450; guest NIC MTU 1500 |
 | `vm-vxlan` | Per-VM Linux VXLAN; inner MTU 1500, underlay MTU 1550 |
 | `host-vxlan` | Shared hypervisor VXLAN bridge; inner MTU 1500, underlay MTU 1550 |
+| `vm-vxlan-1450` | Per-VM Linux VXLAN; inner MTU 1450, guest/physical transport MTU 1500 |
+| `host-vxlan-1450` | Shared host VXLAN; guest/bridge/tunnel MTU 1450, physical MTU 1500 |
 
 Custom VXLAN uses VNI 740 and UDP 4789. Per-VM forwarding reserves
 `10.245.0.0/24`, `cs740vx`, and route protocol 242. Shared host VXLAN uses
 `cs740br`/`cs740hvx` and a separate configurable VTEP subnet. Verify full-size
 underlay packets without fragmentation before measuring custom VXLAN.
+
+For comparisons of Cilium/custom VXLAN implementation overhead, use `vxlan`,
+`vm-vxlan-1450`, and `host-vxlan-1450` with the same endpoints and `--pod-only`.
+All three use inner MTU 1450 and physical MTU 1500. A VM performing
+encapsulation still needs transport NIC MTU 1500; setting it to 1450 would
+leave insufficient room for a full-size inner packet. Preserve the original
+1500-inner-MTU experiments as separate modes. Reset must not recursively delete
+`/run/cilium`, which may contain cgroupfs mounts; reboot clears runtime state.
 
 Kube-proxy is intentionally retained in the current baseline. Do not silently
 enable kube-proxy replacement, eBPF masquerading/host routing, netkit, or other
@@ -114,6 +141,9 @@ Cluster reset removes Kubernetes workloads and cluster state and reboots the
 guests; it preserves VM disks and SSH keys. Creating or editing automation does
 not itself require running a live reset or deployment. Clearly report any live
 operations performed.
+The shared node role must recreate `/etc/kubernetes` before controller/worker
+templates are written after reset; already-installed packages will not restore
+it. `infrastructure/tests/reset-reapply.yml` covers this lifecycle locally.
 
 ## Commit messages
 

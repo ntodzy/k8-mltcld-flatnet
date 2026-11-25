@@ -21,7 +21,7 @@ reboots guests, preserving VM disks and SSH keys.
 
 Options:
   -i, --inventory FILE  Guest inventory (default: generated/guest_inventory.json)
-  --network-mode MODE   Cilium datapath: vxlan (default), native, direct-1450, vm-vxlan, host-vxlan
+  --network-mode MODE   Cilium datapath: vxlan (default), native, direct-1450, vm-vxlan, host-vxlan, vm-vxlan-1450, host-vxlan-1450
   -h, --help            Show this help
 EOF
 }
@@ -62,7 +62,7 @@ if [[ "${network_mode}" == "flat" ]]; then
   network_mode="native"
 fi
 case "${network_mode}" in
-  ""|vxlan|native|direct-1450|vm-vxlan|host-vxlan) ;;
+  ""|vxlan|native|direct-1450|vm-vxlan|host-vxlan|vm-vxlan-1450|host-vxlan-1450) ;;
   *) die "network mode must be vxlan, native, direct-1450, vm-vxlan, or host-vxlan" ;;
 esac
 

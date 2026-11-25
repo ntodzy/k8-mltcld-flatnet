@@ -313,7 +313,7 @@ if [[ "${action}" == "apply" ]]; then
         user: .hypervisor_user
       }
     }] | unique_by(.key)) as $jumps |
-    (["Host *\n  UserKnownHostsFile \"\($known_hosts)\"\n  HashKnownHosts no"]) +
+    (["Host *\n  UserKnownHostsFile \"\($known_hosts)\"\n  HashKnownHosts no\n  StrictHostKeyChecking accept-new\n  BatchMode yes"]) +
     ($jumps | map(
       "Host \(.key)\n  HostName \(.value.hostname)\n  User \(.value.user)\n  IdentityFile \"\($key)\"\n  HostKeyAlias \(.key)\n  StrictHostKeyChecking accept-new"
     )) +
@@ -329,7 +329,7 @@ if [[ "${action}" == "apply" ]]; then
         ansible_host: $vm.management_ipv4,
         ansible_user: $vm.vm_user,
         ansible_ssh_private_key_file: $key,
-        ansible_ssh_common_args: ("-F " + $ssh_config + " -o ProxyJump=cs740-" + $vm.hypervisor + "-jump -o HostKeyAlias=cs740-" + $vm.hypervisor + "-" + $vm.name),
+        ansible_ssh_common_args: ("-F " + ($ssh_config | @sh) + " -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ProxyJump=cs740-" + $vm.hypervisor + "-jump -o HostKeyAlias=cs740-" + $vm.hypervisor + "-" + $vm.name),
         cs740_role: $vm.role,
         experiment_ipv4: $vm.ipv4_address,
         disk_gib: $vm.disk_gib,

@@ -3,6 +3,9 @@
   hosts: hypervisors
   become: true
   gather_facts: false
+  vars:
+    host_vxlan_inner_mtu: "{{ experiment_inner_mtu | default(1500) | int }}"
+    host_vxlan_outer_mtu: "{{ host_vxlan_inner_mtu | int + 50 }}"
   tasks:
     - name: Inspect the preconfigured experiment underlay
       ansible.builtin.command:
@@ -10,44 +13,30 @@
       register: host_vxlan_link
       changed_when: false
 
-    - name: Require a jumbo-capable addressed underlay and unique VTEPs
+    - name: Require an addressed underlay large enough for VXLAN and unique VTEPs
       ansible.builtin.assert:
         that:
-          - (host_vxlan_link.stdout | from_json)[0].mtu | int >= 1550
+          - (host_vxlan_link.stdout | from_json)[0].mtu | int >= host_vxlan_outer_mtu | int
           - vxlan_underlay_ipv4 in ((host_vxlan_link.stdout | from_json)[0].addr_info | map(attribute='local') | list)
           - groups['hypervisors'] | length >= 2
           - groups['hypervisors'] | map('extract', hostvars, 'vxlan_underlay_ipv4') | unique | length == groups['hypervisors'] | length
-        fail_msg: Configure unique experiment underlay IPv4 addresses and MTU >= 1550 first.
+        fail_msg: >-
+          Configure unique experiment underlay IPv4 addresses and
+          MTU >= {{ host_vxlan_outer_mtu }} first.
 
     - name: Verify full-sized underlay packets reach every hypervisor
       ansible.builtin.command:
-        argv: [ping, -n, -I, '{{ vxlan_underlay_interface }}', -M, do, -s, '1522', -c, '1', -W, '3', '{{ hostvars[item].vxlan_underlay_ipv4 }}']
+        argv: [ping, -n, -I, '{{ vxlan_underlay_interface }}', -M, do, -s, '{{ host_vxlan_outer_mtu | int - 28 }}', -c, '1', -W, '3', '{{ hostvars[item].vxlan_underlay_ipv4 }}']
       loop: "{{ groups['hypervisors'] | difference([inventory_hostname]) }}"
       changed_when: false
 
     - name: Write persistent shared VXLAN setup
-      ansible.builtin.copy:
+      ansible.builtin.template:
+        src: ../templates/host-vxlan.sh.j2
         dest: /usr/local/sbin/cs740-host-vxlan
         owner: root
         group: root
         mode: '0755'
-        content: |
-          #!/usr/bin/env bash
-          set -Eeuo pipefail
-          modprobe vxlan
-          if ! ip link show dev cs740br >/dev/null 2>&1; then
-            ip link add cs740br type bridge
-          fi
-          if ! ip link show dev cs740hvx >/dev/null 2>&1; then
-            ip link add cs740hvx type vxlan id 740 local {{ vxlan_underlay_ipv4 | quote }} dev {{ vxlan_underlay_interface | quote }} dstport 4789 nolearning
-          fi
-          ip link set cs740br mtu 1500 up
-          ip link set cs740hvx mtu 1500 master cs740br up
-          # Rebuild only this experiment interface's flood destinations.
-          bridge fdb flush dev cs740hvx self
-          {% for peer in groups['hypervisors'] if peer != inventory_hostname %}
-          bridge fdb append 00:00:00:00:00:00 dev cs740hvx dst {{ hostvars[peer].vxlan_underlay_ipv4 | quote }} self permanent
-          {% endfor %}
 
     - name: Install shared VXLAN service
       ansible.builtin.copy:
