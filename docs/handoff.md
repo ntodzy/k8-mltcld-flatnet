@@ -1,5 +1,46 @@
 # Work handoff
 
+## Active host VXLAN latency optimization follow-up (November 25)
+
+User explicitly reopened investigation: fix host-placement latency; full benchmarks
+authorized as needed. Earlier completed-study stop instructions below apply only
+to those earlier studies. Do not interrupt the new studies or launch competing
+setups. Local snapshots 74e665d / 746179f / 3d14966; no push.
+
+Initial same-boot host default/10µs policy screening is active at
+`results/host-latency-20261125T181639.324738Z/` (3 pairs,20sRR). First two pairs:
+default968.16/968.56µs versus10µs501.48/495.15µs. Not a final estimate.
+`/tmp/cs740-queue-host-latency.py` waits for passed completion, then launches
+`host_latency_study.py` with host-vxlan-routing-legacy-1450,
+host-vxlan-routing-bpf-1450, vm-vxlan-bpf-1450, vxlan: five30sRR pairs per mode
+at default/10µs hypervisor policy, plus separate traces. Queue log:
+`/tmp/cs740-queue-host-latency.log`. It refuses to start if predecessor fails.
+
+New optional host-routing modes retain physical VXLAN/bridge and change Cilium
+forwarding inside the guests. Their Helm prerequisites match and only legacy
+host routing differs. They are NOT the host TC bridge shortcut. Both endpoint
+agent runtime JSON and physical tunnel receipt counters must validate.
+Mode aliases are excluded from original default8. --reuse-base now rejects
+changed guest profiles, avoiding silent relabeling as original baseline.
+All112 unit tests and cluster syntax validation passed.
+
+Next: monitor durable manifests at a sensible interval; fix execution failures,
+complete repeated comparisons and separate path traces, analyze with
+`analyze_host_latency.py`, then choose full RR/single/multi throughput validation
+if a latency fix is promising. Compare equal idle policies and retain a matched
+guest-BPF custom-tunnel reference. Do not claim cross-reset comparisons isolate
+placement alone. Physical NIC audit saved under the screening directory:
+mlx4_en, adaptive RX on, rx-usecs16/high128, TX16; hardware UDP tunnel segmentation
+and tunnel-port offloads off [fixed]. Do not toggle these during active pairs.
+
+Primary code/guide: experiments/host_latency_study.py,
+experiments/analyze_host_latency.py, docs/experiments/host-latency-optimization.md.
+Helpers constrain CPU idle eligibility only per invocation, have600sfallback,
+verify restoration and reject premature expiry. Final setup restores baseline
+host-vxlan-1450; on failure only CPU policy is restored and current mode remains
+for resume. Preserve successful phases and failed attempts. Finish analysis,
+baseline restoration audit and a final local commit; no push.
+
 ## Completed optional forwarding experiment integration (November 25)
 
 User requested separate integrated host/guest bypass experiments. COMPLETE.
