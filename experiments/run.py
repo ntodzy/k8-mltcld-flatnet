@@ -127,7 +127,16 @@ def main():
     parser.add_argument('--network', choices=('both', 'pod', 'host'), default='both')
     parser.add_argument('--diagnostics', action='store_true', help='Separate every sample/path/test and monitor endpoint VMs and hypervisors')
     parser.add_argument('--profile', action='store_true', help='Separate diagnostic run with system-wide perf profiling; requires --diagnostics')
+    parser.add_argument('--path-control', choices=('tunnel', 'bypass'), help='Explicit controlled path for the latency-isolation study')
     args = parser.parse_args()
+    from path_control import MARKER
+    if MARKER.exists():
+        control = json.loads(MARKER.read_text())
+        if (args.path_control != control.get('condition') or args.mode != control.get('mode')
+                or control.get('status') != 'ready'):
+            parser.error('An active path override requires the matching --path-control; restore it with path_control.py')
+    elif args.path_control:
+        parser.error('--path-control requires an active, validated path override')
     if args.pod_only and args.mode == 'vm-local':
         parser.error('vm-local is a host-network baseline and cannot use --pod-only')
     if args.pod_only and args.network == 'host':
@@ -171,6 +180,7 @@ def main():
         'same_node': args.same_node, 'pod_only': args.pod_only, 'namespace': namespace + '-1',
         'test_type': args.test_type, 'network': args.network,
         'setup': active, 'mtu_profile': mtu_profile(args.mode), 'status': 'running',
+        'path_control': args.path_control,
     }
     save_json(output / 'metadata.json', metadata)
     remote_dir = None
@@ -208,6 +218,9 @@ def main():
             (output / f'{label}-routes.json').write_text(snapshot['routes'])
             if label in (args.client, args.server):
                 validate_vm_tunnel(snapshot, label, hosts, args.mode)
+            if args.path_control:
+                from path_control import validate
+                validate(snapshot, label, hosts, args.mode, args.path_control, nodes)
         remote_dir = remote(ssh_config, controller, ['mktemp', '-d', '/tmp/cs740-perf.XXXXXXXX']).strip()
         metadata['remote_report_directory'] = remote_dir
         if not re.fullmatch(r'/tmp/cs740-perf\.[A-Za-z0-9]+', remote_dir):

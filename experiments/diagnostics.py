@@ -379,6 +379,7 @@ def run_diagnostics(args, hosts, ssh_config):
                 ('mode', 'client', 'server', 'duration', 'samples', 'streams', 'pod_only', 'profile', 'test_type', 'network')}
     manifest.update(duration_seconds=args.duration, status='running', diagnostics=True, phases=[],
                     targets=targets, report_count=0, started_utc=datetime.now(timezone.utc).isoformat())
+    manifest['path_control'] = getattr(args, 'path_control', None)
     save_json(output / 'metadata.json', manifest)
     try:
         if args.mode == 'vm-local':
@@ -410,6 +411,8 @@ def run_diagnostics(args, hosts, ssh_config):
                            '--test-type', test, '--network', network, '--output', str(directory / 'measurement')]
                 if args.pod_only:
                     command.append('--pod-only')
+                if getattr(args, 'path_control', None):
+                    command += ['--path-control', args.path_control]
                 with (directory / 'console.log').open('w') as log:
                     with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True) as process:
