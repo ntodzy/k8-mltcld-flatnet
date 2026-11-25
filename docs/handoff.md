@@ -22,6 +22,29 @@ The temporary shell-background queue helper did not survive its launching shell;
 it never started a second study. Started the durable fork/setsid coordinator
 directly AFTER predecessor passed. Do not use that obsolete /tmp queue helper.
 
+Both host blocks and separate traces PASSED: legacy/default1007.952±23.758µs,
+legacy/10µs514.108±10.416; guest-BPF/default810.660±57.375,
+guest-BPF/10µs400.762±15.732, n5x30s each. Mean reductions19.6%/22.0%;
+combined versuslegacy/default60.2%. BPF trace: both guest ip_forward count0;
+physical vxlan_xmit12411/12408 and br_forward24724/24727. Host bridge/VXLAN
+remain; this is supported guest forwarding improvement, not our TC shortcut.
+VM-custom-BPF and Cilium reference blocks are still underway. Report draft
+docs/host-vxlan-latency-followup.md retains separate boot/comparison limitations.
+
+FULL THROUGHPUT VALIDATION IS QUEUED and required before finishing this task:
+`results/host-followup-workflow-20261125T194314.961685Z/`, durable PID1579300.
+Its queue.py uses fork/setsid, waits for the active latency collection to PASS,
+then starts host_latency_study.py for host-vxlan-routing-bpf-1450,
+vm-vxlan-bpf-1450,vxlan: five30s single and multi runs at DEFAULT idle policy
+only (30ordinary phases, plussetups/finalrestoration). Future directory is
+the workflow's `throughput/`. The controller polls293s, preserves current NIC
+settings and1queue drivers, and rejects predecessor failures. It holds no lock
+while waiting; the actual study holds the normal collection lock. Do not use
+collect.py's default host-preparation step, which could restore/change NIC state.
+The new --policies default option is covered by113passing tests (d419a84).
+The latency coordinator uses its archived original source; this small new flag
+does not alter its loaded implementation or any run.py/diagnostics code.
+
 New optional host-routing modes retain physical VXLAN/bridge and change Cilium
 forwarding inside the guests. Their Helm prerequisites match and only legacy
 host routing differs. They are NOT the host TC bridge shortcut. Both endpoint
@@ -34,9 +57,8 @@ governors and KVM halt polling in new studies. Legacy latency-study guards keep
 their previous schema by default. Source copies/hashes saved in new result root.
 
 Next: monitor durable manifests at a sensible interval; fix execution failures,
-complete repeated comparisons and separate path traces, analyze with
-`analyze_host_latency.py`, then choose full RR/single/multi throughput validation
-if a latency fix is promising. Compare equal idle policies and retain a matched
+finish repeated latency comparisons/traces AND queued full single/multi
+validation; analyze with `analyze_host_latency.py`. Compare equal idle policies and retain a matched
 guest-BPF custom-tunnel reference. Do not claim cross-reset comparisons isolate
 placement alone. Physical NIC audit saved under the screening directory:
 mlx4_en, adaptive RX on, rx-usecs16/high128, TX16; hardware UDP tunnel segmentation
