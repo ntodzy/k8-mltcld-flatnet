@@ -8,6 +8,7 @@ import base64
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import select
 import shutil
@@ -16,6 +17,58 @@ import subprocess
 import sys
 import tempfile
 import time
+
+EXPECTED_PODS = {}
+REQUIRE_IDENTITY = False
+
+
+def pod_for_cgroup(cgroup, pods):
+    normalized = cgroup.replace('_', '-').lower()
+    return next((pod for uid, pod in pods.items() if uid.lower() in normalized), None)
+
+
+def task_stat(raw):
+    """Parse proc stat without splitting a parenthesized task name on spaces."""
+    end = raw.rindex(')')
+    fields = raw[end + 2:].split()
+    return {'comm': raw[raw.index('(') + 1:end], 'state': fields[0],
+            'utime': int(fields[11]), 'stime': int(fields[12]),
+            'starttime': int(fields[19]), 'processor': int(fields[36])}
+
+
+def process_observations():
+    netperf, pods, tasks = [], {}, []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            comm = (entry / 'comm').read_text().strip()
+            cgroup = (entry / 'cgroup').read_text() if EXPECTED_PODS else ''
+            pod = pod_for_cgroup(cgroup, EXPECTED_PODS)
+            if pod and pod['uid'] not in pods:
+                namespace = os.readlink(entry / 'ns/net')
+                pods[pod['uid']] = {**pod, 'pid': int(entry.name), 'netns': namespace,
+                    'snmp': read(entry / 'net/snmp'), 'netstat': read(entry / 'net/netstat'),
+                    'tcp': command(['nsenter', '-t', entry.name, '-n', 'ss', '-t', '-i', '-n', '-p'])}
+            selected = pod is not None or comm.startswith(('qemu-system', 'vhost-', 'ksoftirqd/', 'cilium-agent')) or comm in ('netperf', 'netserver')
+            if not selected:
+                continue
+            cmdline = (entry / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
+            if comm == 'netperf' and (pod is not None or not REQUIRE_IDENTITY):
+                netperf.append({'pid': int(entry.name), 'cmdline': cmdline,
+                                'pod_uid': pod['uid'] if pod else None, 'cgroup': cgroup})
+            for task in (entry / 'task').iterdir():
+                try:
+                    stat = task_stat((task / 'stat').read_text())
+                    sched = [int(v) for v in (task / 'schedstat').read_text().split()]
+                    tasks.append({'pid': int(entry.name), 'tid': int(task.name), **stat,
+                                  'run_ns': sched[0], 'wait_ns': sched[1],
+                                  'cmdline': cmdline, 'pod_uid': pod['uid'] if pod else None})
+                except (OSError, ValueError, IndexError):
+                    pass
+        except (OSError, ValueError):
+            pass
+    return netperf, list(pods.values()), tasks
 
 
 def read(path):
@@ -55,21 +108,14 @@ def snapshot():
 
 
 def sample():
-    netperf = []
-    for entry in Path('/proc').iterdir():
-        if entry.name.isdigit():
-            try:
-                if (entry / 'comm').read_text().strip() == 'netperf':
-                    netperf.append({'pid': int(entry.name),
-                                    'cmdline': (entry / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')})
-            except OSError:
-                pass
+    netperf, pods, tasks = process_observations()
     return {
         'stat': read('/proc/stat'), 'softirqs': read('/proc/softirqs'),
         'softnet': read('/proc/net/softnet_stat'),
         'snmp': read('/proc/net/snmp'), 'netstat': read('/proc/net/netstat'),
         'interrupts': read('/proc/interrupts'), 'netdev': read('/proc/net/dev'),
         'tcp': command(['ss', '-t', '-i', '-n', '-p']), 'netperf': netperf,
+        'pods': pods, 'tasks': tasks, 'clock_ticks': os.sysconf('SC_CLK_TCK'),
     }
 
 
@@ -79,6 +125,7 @@ def emit(kind, payload):
 
 
 def main():
+    global EXPECTED_PODS, REQUIRE_IDENTITY
     profile = '--profile' in sys.argv
     workspace = Path(tempfile.mkdtemp(prefix='cs740-diagnostics.'))
     profiler = None
@@ -92,14 +139,19 @@ def main():
             readable, _, _ = select.select([sys.stdin], [], [], 0)
             if readable:
                 control = sys.stdin.readline().strip()
-                if control.startswith('profile ') and profile and profiler is None:
+                if control.startswith('{'):
+                    settings = json.loads(control)
+                    EXPECTED_PODS = {pod['uid']: pod for pod in settings.get('pods', [])}
+                    REQUIRE_IDENTITY = settings.get('require_identity', False)
+                    emit('pod_identity', {'pods': list(EXPECTED_PODS.values()), 'required': REQUIRE_IDENTITY})
+                elif control.startswith('profile ') and profile and profiler is None:
                     duration = int(control.split()[1])
                     if not 1 <= duration <= 3600:
                         raise ValueError('Profile duration must be between 1 and 3600 seconds')
                     profile_log = (workspace / 'perf.log').open('w+')
                     try:
                         profiler = subprocess.Popen(
-                            ['perf', 'record', '-a', '-F', '49', '-g', '-o', str(workspace / 'perf.data'),
+                            ['perf', 'record', '-e', 'cpu-clock', '-a', '-F', '49', '-g', '-o', str(workspace / 'perf.data'),
                              '--', 'sleep', str(duration)],
                             stdin=subprocess.DEVNULL, stdout=profile_log, stderr=profile_log,
                             start_new_session=True)

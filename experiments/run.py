@@ -41,8 +41,8 @@ def perf_arguments(args, namespace, report_dir, client_hostname, server_hostname
         '--host-net=' + str(not args.pod_only and network != 'pod').lower(),
         '--pod-net=' + str(args.mode != 'vm-local' and network != 'host').lower(),
         '--rr=' + str(test in ('all', 'rr')).lower(),
-        '--throughput=' + str(test in ('all', 'single')).lower(),
-        '--throughput-multi=' + str(test in ('all', 'multi')).lower(),
+        '--throughput=' + str(test in ('all', 'throughput', 'single')).lower(),
+        '--throughput-multi=' + str(test in ('all', 'throughput', 'multi')).lower(),
         '--test-namespace', namespace,
         '--namespace-labels', 'pod-security.kubernetes.io/enforce=privileged',
         '--report-dir', report_dir,
@@ -100,7 +100,7 @@ def main():
     parser.add_argument('--same-node', action='store_true', help='Also measure the single-VM path on the server VM')
     parser.add_argument('--output', type=Path, help='New result directory; defaults to results/MODE-UTC_TIMESTAMP')
     parser.add_argument('--dry-run', action='store_true', help='Validate placement and print the command without SSH')
-    parser.add_argument('--test-type', choices=('all', 'rr', 'single', 'multi'), default='all')
+    parser.add_argument('--test-type', choices=('all', 'rr', 'single', 'multi', 'throughput'), default='all')
     parser.add_argument('--network', choices=('both', 'pod', 'host'), default='both')
     parser.add_argument('--diagnostics', action='store_true', help='Separate every sample/path/test and monitor endpoint VMs and hypervisors')
     parser.add_argument('--profile', action='store_true', help='Separate diagnostic run with system-wide perf profiling; requires --diagnostics')

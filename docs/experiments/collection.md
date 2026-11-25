@@ -134,6 +134,35 @@ config requires a new collection so different reservations/topologies are not
 silently combined. The cluster remains in the last successfully configured
 mode, or in a partial setup after a failure; resume resets it before retrying.
 
+If setup failed and you have already repaired it by successfully running
+`experiments/setup.py MODE`, resume using that current setup:
+
+```bash
+./experiments/collect.py --resume results/collection-TIMESTAMP \
+  --use-current-setup --background
+```
+
+This skips reset/setup for **only the first unfinished mode**. The mode and
+inner/guest/physical MTUs in `generated/active-experiment.json` must match that
+next mode, the base config digest must still match, and the original collection's
+host preparation must have succeeded. The runner still checks live node readiness
+and Cilium configuration before measurement. Host NIC audit runs again without
+reapplying the host tuning profile. Later unfinished modes reset/setup normally.
+The option does not resume halfway through diagnostic samples: it measures the
+unfinished mode in a new attempt, preserving previous failures and all successful
+modes, then updates the original collection manifest and metrics CSV.
+
+The new attempt saves `reused-setup.json`, a setup log explaining the skipped
+reset, and `setup_source` provenance in `collection.json`. The reuse request is
+not saved as a default for future resumes. Preview without executing anything:
+
+```bash
+./experiments/collect.py --resume results/collection-TIMESTAMP \
+  --use-current-setup --dry-run
+```
+
+Do not run a standalone measurement concurrently with the resumed collection.
+
 See [runner documentation](runner.md) for metric definitions, whole-run CPU
 limitations, and the distinction between Cilium's same-node and physical-host
 placement. Check the physical-NIC capture described in [vm-local](vm-local.md)

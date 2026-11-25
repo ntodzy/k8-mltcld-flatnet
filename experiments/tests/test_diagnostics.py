@@ -111,7 +111,8 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertEqual(monitor.records[-1]['kind'], 'after')
 
     def test_orchestration_saves_each_report_and_stops_monitors_on_failure(self):
-        hosts = {'worker-1': {'hypervisor': 'node1'}, 'worker-2': {'hypervisor': 'node2'}}
+        hosts = {'worker-1': {'hypervisor': 'node1'}, 'worker-2': {'hypervisor': 'node2'},
+                 'control-1': {'hypervisor': 'node1', 'cs740_role': 'controller'}}
         for failure in ('none', 'ready', 'measurement'):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
                 monitors = []
@@ -127,6 +128,8 @@ class DiagnosticsTests(unittest.TestCase):
                         monitors.append(self)
                     def stop(self):
                         self.stopped = True
+                    def control(self, message):
+                        pass
 
                 class FakeProcess:
                     def __init__(self, command, **kw):

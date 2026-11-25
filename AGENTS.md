@@ -30,6 +30,9 @@ interfaces, or select an experiment.
 - `experiments/collect.py --background`: collect all eight modes with consistent
   parameters and endpoint placement, cluster resets, host NIC audits, a metrics
   CSV, and resumable per-mode attempts. Respect its shared collection lock.
+  `--resume DIR --use-current-setup` reuses a matching successful current setup
+  for only the first unfinished mode; later modes rebuild normally. It creates
+  a new measurement attempt and records the reused setup without rerunning reset.
 - `experiments/hypervisors.py`: optional QEMU/KVM preparation, host NIC tuning,
   audits, and restoration of saved NIC settings. This is separate from the
   hostname configuration wizard.

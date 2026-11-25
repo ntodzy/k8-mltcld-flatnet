@@ -130,6 +130,83 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(manifest['status'], 'failed')
             self.assertEqual(manifest['plan'][1]['status'], 'pending')
 
+    def test_reuse_setup_preserves_success_and_only_skips_first_unfinished_setup(self):
+        with tempfile.TemporaryDirectory() as temp:
+            generated, output = self.prepare(Path(temp))
+            manifest = self.manifest()
+            def fail_second(command, log):
+                if '/experiments/setup.py' in command[1] and command[2] == 'direct-1450':
+                    raise RuntimeError('setup failed')
+                self.fake_runner(command, log)
+            with patch.object(collect, 'GENERATED', generated), patch.object(collect, 'run_logged', side_effect=fail_second):
+                with self.assertRaises(RuntimeError):
+                    collect.execute_collection(output, manifest)
+            successful = output / manifest['plan'][0]['attempts'][0]['directory'] / 'measurement/reports/result.json'
+            before = successful.read_bytes()
+            manifest['plan'].extend(collect.build_plan(['native'], 1, {'cross': ['worker-1', 'worker-2']}))
+            active = {'mode': 'direct-1450', 'cluster_mode': 'direct-1450',
+                      'inner_mtu': 1450, 'guest_mtu': 1500, 'physical_mtu': 1500}
+            (generated / 'active-experiment.json').write_text(json.dumps(active))
+            with patch.object(collect, 'GENERATED', generated), \
+                    patch.object(collect, 'run_logged', side_effect=self.fake_runner) as execute:
+                collect.execute_collection(output, manifest, reuse_setup=True)
+            setups = [call.args[0] for call in execute.call_args_list if '/experiments/setup.py' in call.args[0][1]]
+            self.assertEqual([cmd[2] for cmd in setups], ['native'])
+            self.assertEqual(successful.read_bytes(), before)
+            self.assertEqual(manifest['status'], 'passed')
+            retries = manifest['plan'][1]['attempts']
+            self.assertEqual(len(retries), 2)
+            self.assertEqual(retries[0]['status'], 'failed')
+            self.assertEqual(retries[1]['setup_source'], 'current-successful-setup')
+            self.assertEqual(json.loads((output / retries[1]['directory'] / 'reused-setup.json').read_text()), active)
+            with (output / 'metrics.csv').open() as stream:
+                self.assertEqual(len(list(csv.DictReader(stream))), 3)
+
+    def test_reuse_rejects_absent_or_mismatched_setup_without_mutation(self):
+        for active in (None, {'mode': 'native'}, {'mode': 'vxlan', 'cluster_mode': 'vxlan',
+                          'inner_mtu': 1500, 'guest_mtu': 1500, 'physical_mtu': 1500}):
+            with self.subTest(active=active), tempfile.TemporaryDirectory() as temp:
+                generated, output = self.prepare(Path(temp))
+                manifest = self.manifest()
+                manifest['host_preparation_passed'] = True
+                before = json.dumps(manifest)
+                if active is not None:
+                    (generated / 'active-experiment.json').write_text(json.dumps(active))
+                with patch.object(collect, 'GENERATED', generated), patch.object(collect, 'run_logged') as execute:
+                    with self.assertRaises(ValueError):
+                        collect.execute_collection(output, manifest, reuse_setup=True)
+                execute.assert_not_called()
+                self.assertEqual(json.dumps(manifest), before)
+                self.assertFalse(list(output.iterdir()))
+
+    def test_reuse_option_requires_resume(self):
+        with patch.object(sys, 'argv', ['collect.py', '--use-current-setup']):
+            with self.assertRaisesRegex(ValueError, 'requires --resume'):
+                collect.main()
+
+    def test_reuse_resume_dry_run_checks_setup_without_writing_or_running(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            generated, output = self.prepare(root)
+            config = root / 'config.json'
+            config.write_text(json.dumps(BASE))
+            manifest = self.manifest()
+            manifest['parameters']['config'] = str(config)
+            manifest['config_sha256'] = hashlib.sha256(config.read_bytes()).hexdigest()
+            manifest['host_preparation_passed'] = True
+            (output / 'collection.json').write_text(json.dumps(manifest))
+            (generated / 'active-experiment.json').write_text(json.dumps({
+                'mode': 'vxlan', 'cluster_mode': 'vxlan', 'inner_mtu': 1450,
+                'guest_mtu': 1500, 'physical_mtu': 1500}))
+            before = (output / 'collection.json').read_bytes()
+            argv = ['collect.py', '--resume', str(output), '--use-current-setup', '--dry-run']
+            with patch.object(sys, 'argv', argv), patch.object(collect, 'GENERATED', generated), \
+                    patch.object(collect, 'execute_collection') as execute, redirect_stdout(io.StringIO()) as stream:
+                collect.main()
+            execute.assert_not_called()
+            self.assertIn('Reuse current setup for vxlan only', stream.getvalue())
+            self.assertEqual((output / 'collection.json').read_bytes(), before)
+
     def test_dry_run_never_executes_commands_or_creates_results(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / 'results'

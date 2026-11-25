@@ -35,6 +35,11 @@
   become: true
   gather_facts: false
   tasks:
+    - name: Wait for guest SSH after Terraform interface reconciliation
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        sleep: 5
+      become: false
     - name: Persist the guest experiment MTU in netplan
       ansible.builtin.copy:
         dest: /etc/netplan/99-cs740-experiment-mtu.yaml

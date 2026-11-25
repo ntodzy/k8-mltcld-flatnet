@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 
-from common import GENERATED, MODES, ROOT
+from common import GENERATED, MODES, ROOT, mtu_profile, save_json
 from run import positive, select_pair
 from setup import deployment_config
 
@@ -119,7 +119,29 @@ def summarize(directory, manifest):
                         })
 
 
-def execute_collection(directory, manifest):
+def current_setup(manifest):
+    """Check local successful-setup evidence; run.py still validates the live cluster."""
+    pending = next((step for step in manifest['plan'] if step['status'] != 'passed'), None)
+    if pending is None:
+        raise ValueError('Collection has no unfinished measurements to resume')
+    if not manifest.get('host_preparation_passed'):
+        raise ValueError('Cannot reuse setup before the collection host preparation has succeeded')
+    path = GENERATED / 'active-experiment.json'
+    if not path.is_file():
+        raise ValueError('No successful current setup; run setup.py for the next mode first')
+    active = json.loads(path.read_text())
+    mode = pending['mode']
+    cluster_mode = 'native' if mode == 'vm-local' else mode
+    expected = {key: value for key, value in mtu_profile(mode).items() if key != 'cilium_mtu'}
+    expected.update(mode=mode, cluster_mode=cluster_mode)
+    if any(active.get(key) != value for key, value in expected.items()):
+        raise ValueError(f'Current successful setup does not match next mode {mode} and its MTUs; run setup.py {mode} first')
+    return active
+
+
+def execute_collection(directory, manifest, reuse_setup=False):
+    # Reject a mismatched reuse request before changing status or creating an attempt.
+    reused = current_setup(manifest) if reuse_setup else None
     parameters = manifest['parameters']
     manifest['status'] = 'running'
     manifest.pop('error', None)
@@ -148,9 +170,19 @@ def execute_collection(directory, manifest):
             manifest['phase'] = 'setup-' + step['mode']
             write_manifest(directory, manifest)
             try:
-                run_logged([sys.executable, str(ROOT / 'experiments/setup.py'), step['mode'],
-                            '--config', parameters['config'], '--reset',
-                            '--underlay-subnet', parameters['underlay_subnet']], work / 'setup.log')
+                if reused is not None:
+                    attempt['setup_source'] = 'current-successful-setup'
+                    save_json(work / 'reused-setup.json', reused)
+                    (work / 'setup.log').write_text(
+                        'Reused successful current setup by explicit --use-current-setup request.\n'
+                        'No reset or setup was run for this attempt. Live measurement validation still applies.\n')
+                    print(f'Reusing current setup for {step["mode"]}; skipping reset/setup.', flush=True)
+                    # Reuse applies only to the first unfinished step. Later modes rebuild normally.
+                    reused = None
+                else:
+                    run_logged([sys.executable, str(ROOT / 'experiments/setup.py'), step['mode'],
+                                '--config', parameters['config'], '--reset',
+                                '--underlay-subnet', parameters['underlay_subnet']], work / 'setup.log')
                 # Record physical NIC capabilities/effective offloads for every mode.
                 manifest['phase'] = 'audit-' + step['mode']
                 write_manifest(directory, manifest)
@@ -218,6 +250,8 @@ def parse_args():
     parser.add_argument('--underlay-subnet', default='10.75.0.0/24')
     parser.add_argument('--output', type=Path, help='New collection directory under which every run is saved')
     parser.add_argument('--resume', type=Path, help='Resume a collection using its saved plan and parameters')
+    parser.add_argument('--use-current-setup', action='store_true',
+                        help='With --resume, reuse the successful current setup for only the first unfinished mode')
     parser.add_argument('--background', action='store_true', help='Detach collection and write output to collection.log')
     parser.add_argument('--dry-run', action='store_true', help='Print the plan without SSH or file changes')
     return parser.parse_args()
@@ -227,14 +261,16 @@ def main():
     args = parse_args()
     if args.resume:
         # The saved plan is authoritative; avoid silently ignoring parameter changes.
-        if any(arg.split('=')[0] not in ('--resume', '--dry-run', '--background') for arg in sys.argv[1:] if arg.startswith('--')):
-            raise ValueError('--resume may only be combined with --dry-run/--background; parameters come from collection.json')
+        if any(arg.split('=')[0] not in ('--resume', '--dry-run', '--background', '--use-current-setup') for arg in sys.argv[1:] if arg.startswith('--')):
+            raise ValueError('--resume may only be combined with --dry-run/--background/--use-current-setup; parameters come from collection.json')
         directory = args.resume.expanduser().resolve()
         manifest = json.loads((directory / 'collection.json').read_text())
         current_digest = hashlib.sha256(Path(manifest['parameters']['config']).read_bytes()).hexdigest()
         if current_digest != manifest['config_sha256']:
             raise ValueError('Base deployment config changed; start a new collection to preserve comparability')
     else:
+        if args.use_current_setup:
+            raise ValueError('--use-current-setup requires --resume')
         if args.pod_only and 'vm-local' in args.modes:
             raise ValueError('--pod-only cannot include vm-local; select Pod experiments using --modes')
         config_path = args.config.expanduser().resolve()
@@ -254,6 +290,9 @@ def main():
     for step in manifest['plan']:
         print(f'Round {step["round"]}: {step["mode"]}: {step["client"]} -> {step["server"]} [{step["status"]}]')
     if args.dry_run:
+        if args.use_current_setup:
+            active = current_setup(manifest)
+            print(f'Reuse current setup for {active["mode"]} only; later modes reset/setup normally. No commands executed.')
         return
     GENERATED.mkdir(parents=True, exist_ok=True)
     with (GENERATED / 'collection.lock').open('a') as lock:
@@ -261,6 +300,8 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError('Another collection/comparison is active; wait until it finishes')
+        if args.use_current_setup:
+            current_setup(manifest)  # Fail in the foreground before detaching.
         if not args.resume:
             directory.mkdir(parents=True, exist_ok=False)
         if args.background:
@@ -279,7 +320,10 @@ def main():
                 os.dup2(log.fileno(), 1)
                 os.dup2(log.fileno(), 2)
             # The child retains this file description's lock after its parent exits.
-        execute_collection(directory, manifest)
+        if args.use_current_setup:
+            execute_collection(directory, manifest, reuse_setup=True)
+        else:
+            execute_collection(directory, manifest)
     print(f'Collection passed. Metrics: {directory / "metrics.csv"}')
 
 

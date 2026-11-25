@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -13,7 +14,7 @@ import sys
 import threading
 import time
 
-from common import ROOT, save_json, ssh_command
+from common import ROOT, save_json, ssh_command, remote
 
 
 def phases(args):
@@ -22,7 +23,7 @@ def phases(args):
         networks = ['pod']
     if args.network != 'both':
         networks = [args.network]
-    tests = ['rr', 'single', 'multi'] if args.test_type == 'all' else [args.test_type]
+    tests = ['rr', 'single', 'multi'] if args.test_type == 'all' else ['single', 'multi'] if args.test_type == 'throughput' else [args.test_type]
     return [(sample, network, test) for sample in range(1, args.samples + 1)
             for network in networks for test in tests]
 
@@ -101,6 +102,41 @@ def summary(records, active_start=None, active_end=None):
             result[field + '_delta'] = counters_delta(paired_counters(first[field]), paired_counters(last[field]))
         result['softnet_delta'] = counters_delta(softnet_totals(first['softnet']), softnet_totals(last['softnet']))
         result['softirq_delta'] = counters_delta(softirq_rows(first['softirqs']), softirq_rows(last['softirqs']))
+        result['pod_tcp'] = {}
+        uids = {pod['uid'] for record in active for pod in record.get('pods', [])}
+        for uid in uids:
+            observations = [(record, pod) for record in active for pod in record.get('pods', []) if pod['uid'] == uid]
+            if len(observations) < 2:
+                continue
+            a, b = observations[0][1], observations[-1][1]
+            if a['netns'] != b['netns']:
+                result['warnings'].append(f'Pod {uid} changed network namespace; TCP delta omitted')
+                continue
+            entry = {key: a.get(key) for key in ('uid', 'name', 'namespace', 'node', 'host_network', 'netns')}
+            entry['observed_seconds'] = observations[-1][0]['received_epoch'] - observations[0][0]['received_epoch']
+            for field in ('snmp', 'netstat'):
+                if isinstance(a.get(field), str) and isinstance(b.get(field), str):
+                    entry[field + '_delta'] = counters_delta(paired_counters(a[field]), paired_counters(b[field]))
+            sockets = [pod['tcp'] for _, pod in observations if pod.get('tcp', {}).get('exit_code') == 0]
+            for label, pattern in [('cwnd', r'\bcwnd:(\d+)'), ('rtt_ms', r'\brtt:([\d.]+)')]:
+                values = [float(value) for socket in sockets for value in re.findall(pattern, socket['output'])]
+                if values:
+                    entry[label] = {'min': min(values), 'max': max(values), 'mean': sum(values) / len(values)}
+            result['pod_tcp'][uid] = entry
+        if first.get('tasks') is not None:
+            def task_key(task):
+                return (task['pid'], task['tid'], task['starttime'])
+            initial = {task_key(task): task for task in first['tasks']}
+            duration = result['observed_active_seconds']
+            ticks = first['clock_ticks']
+            result['threads'] = []
+            for task in last.get('tasks', []):
+                previous = initial.get(task_key(task))
+                if previous is None:
+                    continue
+                used = task['utime'] + task['stime'] - previous['utime'] - previous['stime']
+                result['threads'].append({**task, 'cpu_percent_one_core': round(100 * used / ticks / duration, 3),
+                                          'scheduler_wait_ms': (task['wait_ns'] - previous['wait_ns']) / 1e6})
     else:
         result['warnings'].append('Too few active samples for workload CPU/counter attribution')
     snapshots = {r['kind']: r for r in records if r['kind'] in ('before', 'after')}
@@ -184,6 +220,7 @@ def run_diagnostics(args, hosts, ssh_config):
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
     output = (args.output or ROOT / 'results' / f'{args.mode}-diagnostics-{stamp}').resolve()
     targets = {name: name for name in (args.client, args.server)}
+    controller = next(name for name, host in hosts.items() if host.get('cs740_role') == 'controller')
     for name in (args.client, args.server):
         host = hosts[name]['hypervisor']
         targets['hypervisor-' + host] = 'cs740-' + host + '-jump'
@@ -196,7 +233,7 @@ def run_diagnostics(args, hosts, ssh_config):
         return
     output.mkdir(parents=True, exist_ok=False)
     manifest = {key: getattr(args, key) for key in
-                ('mode', 'client', 'server', 'duration', 'samples', 'streams', 'pod_only', 'profile')}
+                ('mode', 'client', 'server', 'duration', 'samples', 'streams', 'pod_only', 'profile', 'test_type', 'network')}
     manifest.update(duration_seconds=args.duration, status='running', diagnostics=True, phases=[],
                     targets=targets, report_count=0, started_utc=datetime.now(timezone.utc).isoformat())
     save_json(output / 'metadata.json', manifest)
@@ -220,6 +257,8 @@ def run_diagnostics(args, hosts, ssh_config):
                     if not monitor.ready.wait(max(0, deadline - time.monotonic())) or not any(
                             r['kind'] == 'ready' for r in monitor.records):
                         raise RuntimeError(f'{label} diagnostic sampler failed to become ready')
+                for label, monitor in monitors.items():
+                    monitor.control(json.dumps({'pods': [], 'require_identity': label in (args.client, args.server)}))
                 command = [sys.executable, str(ROOT / 'experiments/run.py'), args.mode,
                            '--client', args.client, '--server', args.server,
                            '--duration', str(args.duration), '--samples', '1', '--streams', str(args.streams),
@@ -230,8 +269,31 @@ def run_diagnostics(args, hosts, ssh_config):
                     with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True) as process:
                         profiling_started = False
+                        identity_ready = False
+                        next_discovery = 0
                         try:
                             while process.poll() is None:
+                                if not identity_ready and time.monotonic() >= next_discovery:
+                                    next_discovery = time.monotonic() + 3
+                                    metadata_path = directory / 'measurement/metadata.json'
+                                    if metadata_path.exists():
+                                        try:
+                                            child = json.loads(metadata_path.read_text())
+                                            payload = json.loads(remote(ssh_config, controller, [
+                                                'sudo', '-n', 'kubectl', '--kubeconfig=/etc/kubernetes/admin.conf',
+                                                '-n', child['namespace'], 'get', 'pods', '-o', 'json']))
+                                            pods = [{'uid': pod['metadata']['uid'], 'name': pod['metadata']['name'],
+                                                     'namespace': child['namespace'], 'node': pod['spec'].get('nodeName'),
+                                                     'host_network': pod['spec'].get('hostNetwork', False)}
+                                                    for pod in payload['items'] if pod['spec'].get('nodeName')]
+                                            if all(any(pod['node'] == node for pod in pods) for node in (args.client, args.server)):
+                                                save_json(directory / 'pod-identities.json', pods)
+                                                for label in (args.client, args.server):
+                                                    monitors[label].control(json.dumps({'pods': [p for p in pods if p['node'] == label],
+                                                                                       'require_identity': True}))
+                                                identity_ready = True
+                                        except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
+                                            pass  # Namespace/Pods may still be starting; retry before benchmark activity.
                                 # Profile all targets only once the client's netperf is visible.
                                 if args.profile and not profiling_started and any(
                                         r['kind'] == 'sample' and r['netperf'] for r in monitors[args.client].records):
