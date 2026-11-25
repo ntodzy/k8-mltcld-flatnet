@@ -85,6 +85,18 @@ class BottleneckTests(unittest.TestCase):
         self.assertEqual(sum(step.get('restore', False) for step in plan), 1)
         self.assertFalse(any('contention' in step['name'] or 'hubble' in step['name'] for step in plan))
 
+    def test_final_controls_restore_affinity_and_queues_and_leave_initial_mode(self):
+        plan = study.final_controls()
+        self.assertEqual(plan[-1]['kind'], 'setup')
+        self.assertEqual(plan[-1]['mode'], 'host-vxlan-1450')
+        actions = [step['action'] for step in plan if step['kind'] == 'affinity']
+        self.assertEqual(actions, ['pin', 'restore'])
+        for mode in ('host-vxlan-1450', 'vxlan', 'vm-vxlan-1450'):
+            queues = [step for step in plan if step['mode'] == mode and step['kind'] == 'queues']
+            self.assertEqual(len(queues), 2)
+            self.assertEqual(queues[0]['queues'], 2)
+            self.assertTrue(queues[1]['restore'])
+
     def test_data_socket_metrics_exclude_netperf_control_connections(self):
         raw = ('State Recv-Q Send-Q Local Peer Process\n'
                'ESTAB 0 0 10.0.0.1:40000 10.0.0.2:12865 users:netperf\n\t cubic cwnd:10 rtt:1/0.1\n'

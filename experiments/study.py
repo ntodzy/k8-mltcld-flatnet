@@ -44,8 +44,24 @@ def final_controls():
         ('host-1450-unpinned', 'measurement', {'samples': 3, 'test_type': 'multi'}),
         ('restore-final-queues', 'queues', {'restore': True}),
     ]
-    return [dict(name=name, kind=kind, mode='host-vxlan-1450', status='pending', attempts=[], **settings)
-            for name, kind, settings in specifications]
+    steps = [dict(name=name, kind=kind, mode='host-vxlan-1450', status='pending', attempts=[], **settings)
+             for name, kind, settings in specifications]
+    # The host intervention alone cannot establish whether a gain is specific
+    # to tunnel placement. Repeat it on both other matched VXLAN paths.
+    for mode in ('vxlan', 'vm-vxlan-1450'):
+        for suffix, kind, settings in (
+            ('queue-control-setup', 'setup', {}),
+            ('one-queue-control', 'measurement', {'samples': 3, 'test_type': 'multi'}),
+            ('enable-two-queues', 'queues', {'queues': 2}),
+            ('two-queue-control', 'measurement', {'samples': 5, 'test_type': 'throughput'}),
+            ('restore-one-queue', 'queues', {'restore': True}),
+            ('restored-queue-control', 'measurement', {'samples': 3, 'test_type': 'multi'}),
+        ):
+            steps.append(dict(name=mode + '-' + suffix, kind=kind, mode=mode,
+                              status='pending', attempts=[], **settings))
+    steps.append(dict(name='restore-initial-host-mode', kind='setup', mode='host-vxlan-1450',
+                      status='pending', attempts=[]))
+    return steps
 
 
 def execute(directory, state):
@@ -113,7 +129,7 @@ def main():
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--append-host-controls', action='store_true',
-                        help='After the initial study completes, add the stable host repeat and reversible vhost-affinity controls')
+                        help='After the initial study completes, add the host repeat, reversible affinity and cross-mode queue controls')
     args = parser.parse_args()
     if args.append_host_controls and not args.resume:
         parser.error('--append-host-controls requires --resume')

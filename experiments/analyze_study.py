@@ -209,6 +209,8 @@ def report(directory, output, partial=False):
         'all-modes': list(main.values()),
         'matched-vxlan': [main[mode] for mode in ('vxlan', 'vm-vxlan-1450', 'host-vxlan-1450') if mode in main],
         'queue-control': [measurements[name] for name in ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored') if name in measurements],
+        'cilium-queue-control': [measurements[name] for name in ('vxlan-one-queue-control', 'vxlan-two-queue-control', 'vxlan-restored-queue-control') if name in measurements],
+        'vm-queue-control': [measurements[name] for name in ('vm-vxlan-1450-one-queue-control', 'vm-vxlan-1450-two-queue-control', 'vm-vxlan-1450-restored-queue-control') if name in measurements],
         'affinity-control': [measurements[name] for name in ('host-1450-two-queues-repeat', 'host-1450-pinned', 'host-1450-unpinned') if name in measurements],
         'attachment-control': [main[mode] for mode in ('direct-1450', 'bridge-1450', 'host-vxlan-1450') if mode in main],
         'mtu-control': [main[mode] for mode in ('native', 'direct-1450', 'vm-vxlan', 'vm-vxlan-1450', 'host-vxlan', 'host-vxlan-1450') if mode in main],
@@ -246,6 +248,16 @@ def report(directory, output, partial=False):
     text += ['', 'P99 values are averages of per-sample percentiles, not pooled percentiles. '
              'VM-local bypasses the Pod path and physical link and should not be ranked as an equivalent overlay workload.', '',
              '## Why the host path scales differently', '']
+    if 'vm-local' in main:
+        validation = json.loads((main['vm-local']['work'] / 'local-path-validation/validation.json').read_text())
+        link = validation.get('link_evidence', {})
+        text[-2:-2] = [
+            'The separate VM-local validation passed with an egress-only capture and verified same-parent macvtap bridge attachments. '
+            f'Physical TX increased by {link.get("physical_tx_bytes", "unavailable")} bytes over the whole validation invocation, '
+            f'compared with approximately {link.get("estimated_application_bytes", "unavailable")} application bytes. '
+            'Background traffic is included in the NIC counter. Bidirectional tcpdump can see local macvtap frames at the lower device taps '
+            'without physical transmission '
+            '([Linux macvlan forwarding source](https://github.com/torvalds/linux/blob/v6.8/drivers/net/macvlan.c#L497)).', '']
     queue_names = ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored')
     table = []
     for name in queue_names:
@@ -277,6 +289,25 @@ def report(directory, output, partial=False):
              'The host CPU-s/GB column estimates monitored physical-host busy logical CPUs divided by measured application GB/s. '
              'It includes guest execution, background control-plane work and monitoring, and does not add guest CPU again. '
              'The CPU and application-rate windows are approximately aligned, so this is a resource-cost proxy, not isolated encapsulation cost or energy efficiency.', '',
+             '## Queue controls across tunnel implementations', '']
+    cross_queue_rows = []
+    for mode in ('vxlan', 'vm-vxlan-1450'):
+        for suffix in ('one-queue-control', 'two-queue-control', 'restored-queue-control'):
+            name = mode + '-' + suffix
+            if name in measurements:
+                m, d = measurements[name], evidence[name]['diagnostics']
+                cross_queue_rows.append([name, len(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])),
+                    describe(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []), .001),
+                    describe(d.get('worker-1/retrans_per_1000_outsegs', [])),
+                    describe(d.get('estimated_host_cpu_seconds_per_GB', []))])
+    if cross_queue_rows:
+        text += [aggregate.table(['Control', 'n', 'Multi Gb/s', 'Sender retrans/1000 OutSegs', 'Estimated host CPU-s/GB'], cross_queue_rows), '',
+                 'These per-mode one/two/restored-queue controls test whether virtual-NIC/backend parallelism helps other tunnel paths too. '
+                 'One-queue checks use three samples; two-queue single/multistream checks use five. '
+                 'Compare within each mode and retain the different sample counts; a queue gain alone is not a placement-specific advantage.']
+    else:
+        text.append('The additional Cilium and per-VM queue controls have not completed.')
+    text += ['',
              '## Vhost affinity control', '']
     affinity_rows = []
     for name in ('host-1450-two-queues-repeat', 'host-1450-pinned', 'host-1450-unpinned'):

@@ -50,6 +50,13 @@ also receives a mask, so this is a worker-backend affinity control rather than
 perfect isolation of one network device. Original masks are backed up, validated
 against process lifetimes, restored before the reversal, and queues are finally
 restored to their original configuration. No pinning persists across VM restarts.
+The appended plan also repeats the queue intervention on Cilium VXLAN and
+per-VM VXLAN at inner MTU 1450: three one-queue multistream samples, five
+two-queue single/multistream samples, and three restored-queue multistream
+samples per mode. This distinguishes a general virtio/backend improvement from
+a benefit specific to the host tunnel. Finally it rebuilds host-vxlan-1450 with
+the original one-queue configuration. These are queue controls for one worker
+pair, not multi-VM contention/scaling tests.
 
 The study shares the collection lock and rejects overlapping collections. It
 records setup, queue transitions, measurements, failures and retry directories

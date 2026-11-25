@@ -2,6 +2,19 @@
 
 ## Active overnight work (November 24–25)
 
+07:27 UTC update: VM-local attempt 2 passed its full measurements (multi
+24.080 ±0.510 Gb/s, mean RR109.706 ±1.830 µs). Cilium VXLAN passed (multi
+4.015 ±0.181 Gb/s, mean RR821.668 ±53.065 µs). Thus its multistream result
+matches the initial host baseline closely; do not repeat the prior assumption
+that host VXLAN alone has poor stream scaling. Initial study is now setting up
+vm-vxlan-1450. Based on this result, `final_controls()` now adds matching queue
+controls for Cilium and per-VM VXLAN too, after the host affinity/reversal series,
+then restores the initial host mode. The same `--append-host-controls` command
+now appends 22 steps for a total of 44, not the earlier nine/31. Each extra mode
+uses 3xmulti one-queue, 5xsingle+multi two-queue, 3xmulti restored, plus setup and
+reversible queue changes. This tests whether the queue benefit is generic across
+the tunnel paths. No contention/multi-VM scaling or Cilium tuning/Hubble profiles.
+
 Latest update (06:30 UTC): native and direct-1450 baselines passed. Native
 multi 8.858 ±0.287 Gb/s; direct-1450 8.312 ±0.583. Native RR sample means
 236.63,317.75,635.75,788.77,181.15 µs show substantial run-to-run variation.
@@ -13,7 +26,12 @@ the 5-second application run transferred roughly 15 GB (23.948 Gb/s). The correc
 validation uses egress-only capture, checks live same-parent bridge-mode MACs,
 and compares hardware TX bytes against application bytes (<1% including background).
 It preserves the failed attempt and will resume VM-local in a new attempt.
-Local Git checkpoints now include `ab8b3ec` (affinity) and `07889a7` (compact figures).
+Local Git checkpoints now include `ab8b3ec` (affinity), `07889a7` (compact figures),
+and `817ac04` (macvtap validation correction). Resume PID 1124699 is running
+VM-local attempt 2. Its new validation PASSED: zero captured egress TCP packets,
+zero capture drops, 204567 physical TX bytes versus 15196312500 estimated
+application bytes (0.001346%). libpcap's pre-direction-filter received count
+was 381708, demonstrating why it cannot be used as a zero-egress condition.
 
 The user explicitly authorized remote changes, cluster resets, all eight mode
 reruns, host/Pod diagnostics, queue and attachment controls, and a final analysis
