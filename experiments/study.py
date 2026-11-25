@@ -32,8 +32,25 @@ def plan():
     return steps
 
 
+def final_controls():
+    specifications = [
+        ('restore-host-1450', 'setup', {}),
+        ('host-1450-final-baseline', 'measurement', {}),
+        ('enable-final-two-queues', 'queues', {'queues': 2}),
+        ('host-1450-two-queues-repeat', 'measurement', {'samples': 3, 'test_type': 'multi'}),
+        ('pin-vhost-cores', 'affinity', {'action': 'pin'}),
+        ('host-1450-pinned', 'measurement', {'samples': 5, 'test_type': 'multi'}),
+        ('restore-vhost-affinity', 'affinity', {'action': 'restore'}),
+        ('host-1450-unpinned', 'measurement', {'samples': 3, 'test_type': 'multi'}),
+        ('restore-final-queues', 'queues', {'restore': True}),
+    ]
+    return [dict(name=name, kind=kind, mode='host-vxlan-1450', status='pending', attempts=[], **settings)
+            for name, kind, settings in specifications]
+
+
 def execute(directory, state):
     from queues import configure
+    from affinity import configure as configure_affinity
     state.update(status='running', pid=os.getpid())
     state.pop('error', None)
     write_manifest(directory, state)
@@ -52,6 +69,8 @@ def execute(directory, state):
             try:
                 if step['kind'] == 'queues':
                     configure(['worker-1', 'worker-2'], step.get('queues'), step.get('restore', False), work / 'queue-audit.json')
+                elif step['kind'] == 'affinity':
+                    configure_affinity(step['action'], work / 'affinity-audit.json')
                 elif step['kind'] == 'setup':
                     run_logged([sys.executable, str(ROOT / 'experiments/setup.py'), step['mode'], '--reset'], work / 'setup.log')
                 else:
@@ -93,7 +112,11 @@ def main():
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--append-host-controls', action='store_true',
+                        help='After the initial study completes, add the stable host repeat and reversible vhost-affinity controls')
     args = parser.parse_args()
+    if args.append_host_controls and not args.resume:
+        parser.error('--append-host-controls requires --resume')
     config = ROOT / 'infrastructure/config.json'
     digest = hashlib.sha256(config.read_bytes()).hexdigest()
     if args.resume:
@@ -101,6 +124,13 @@ def main():
         state = json.loads((directory / 'collection.json').read_text())
         if state['config_sha256'] != digest:
             raise ValueError('Deployment config changed since this study started')
+        if args.append_host_controls:
+            if state.get('final_controls_added'):
+                raise ValueError('Host controls are already present; resume without --append-host-controls')
+            if state['status'] != 'passed' or any(step['status'] != 'passed' for step in state['plan']):
+                raise ValueError('Finish the initial study before adding the final controls')
+            state['plan'].extend(final_controls())
+            state.update(status='pending', phase='final-host-controls', final_controls_added=True)
     else:
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         directory = (args.output or ROOT / 'results' / f'extended-study-{stamp}').resolve()

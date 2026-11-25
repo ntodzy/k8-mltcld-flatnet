@@ -23,6 +23,24 @@ single-queue worker NICs. Start or resume the durable sequential plan:
 ./experiments/study.py --resume results/extended-study-TIMESTAMP --background
 ```
 
+After the initial plan completes, add the final stable host baseline and
+reversible vhost-affinity comparison, then leave the host mode on one queue:
+
+```bash
+./experiments/study.py --resume results/extended-study-TIMESTAMP \
+  --append-host-controls --background
+```
+
+This rebuilds the initial host-vxlan-1450 mode, repeats the full baseline with
+the settled sampler, and compares unpinned/pinned/unpinned two-queue multistream
+runs (three/five/three samples). Only vhost threads belonging to the two workers
+are pinned, across two distinct physical cores on the NIC NUMA node if exposed.
+Guest vCPU and IRQ affinities remain automatic. The worker management vhost thread
+also receives a mask, so this is a worker-backend affinity control rather than
+perfect isolation of one network device. Original masks are backed up, validated
+against process lifetimes, restored before the reversal, and queues are finally
+restored to their original configuration. No pinning persists across VM restarts.
+
 The study shares the collection lock and rejects overlapping collections. It
 records setup, queue transitions, measurements, failures and retry directories
 in `collection.json`, writes `collection.log`, and never overwrites an earlier
@@ -43,7 +61,7 @@ python3 experiments/analyze_study.py results/extended-study-TIMESTAMP \
 This requires the Matplotlib environment described in [aggregation](aggregation.md).
 `--partial` labels interim reports and includes only successful measurement steps.
 The output separates ordinary modes, matched VXLAN, queue controls, attachment
-controls, and MTU comparisons. It also retains evidence tables and profiling
+controls, affinity controls, and MTU comparisons. It also retains evidence tables and profiling
 results, including estimated physical-host CPU-seconds per application GB;
 guest CPU is not added again to host CPU accounting.
 

@@ -53,6 +53,20 @@ its initial mode. Early sampler additions were made during the first host
 baseline; the queue/reversal and later mode runs use the settled implementation.
 One clean way is to append setup-host-vxlan-1450 + host-1450-final-baseline steps
 to the completed manifest and resume the same study (preserve all history).
+Use the implemented command:
+`./experiments/study.py --resume results/extended-study-20261125T042706Z --append-host-controls --background`.
+It adds nine steps: host setup, full final baseline, two queues, 3-sample unpinned
+multi, vhost pinning, 5-sample pinned multi, affinity restore, 3-sample unpinned
+reversal, and final queue restore. This explores the observed heavy migration of
+vhost threads, using two distinct physical cores near the NIC where available.
+The queue intervention itself completed: single 3.326 ±0.130 Gb/s (baseline
+3.587 ±0.071), multi 5.601 ±0.156 (baseline 4.013 ±0.130), about +40% multi.
+TCP retrans/1000 OutSegs increased to 4.467 ±0.374, with much larger DSACK and
+SACK reordering counters. Two vhost threads each carry substantial load. Do not
+claim retransmissions disappeared: no TAP drops were observed in the two-queue
+samples, but retransmission/reordering indicators rose. Queue-restore reversal
+was running at last check; remaining ordinary modes then run automatically.
+
 The analysis selects the last baseline per mode, so the final host repeat will
 replace the initial host baseline only in the main comparison; queue-control
 tables retain the initial A/B/A sequence. Do not stop work at detached status.

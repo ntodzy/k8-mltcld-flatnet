@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+import tempfile
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,12 +11,34 @@ import diagnostics
 import setup
 import study
 import analyze_study
+import affinity_agent
 from common import ROOT, mtu_profile
 from queue_agent import driver_xml
 from test_diagnostics import record
 
 
 class BottleneckTests(unittest.TestCase):
+    def test_affinity_selects_distinct_physical_cores_and_parses_numa_cpu_ranges(self):
+        self.assertEqual(affinity_agent.cpulist('0-2,4,6-7'), {0, 1, 2, 4, 6, 7})
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for cpu, core in ((0, 0), (1, 0), (2, 1), (3, 1)):
+                path = root / f'cpu{cpu}/topology'
+                path.mkdir(parents=True)
+                (path / 'physical_package_id').write_text('0')
+                (path / 'core_id').write_text(str(core))
+            chosen = affinity_agent.choose_cpus({0, 1, 2, 3}, root)
+            self.assertEqual(chosen, [1, 2])
+            with self.assertRaises(ValueError):
+                affinity_agent.choose_cpus({0, 1}, root)
+
+    def test_profiles_use_self_overhead_and_keep_network_work_in_idle_context(self):
+        raw = (' 90.0% 80.0% swapper [kernel.kallsyms] [k] cpuidle_enter_state\n'
+               ' 50.0% 1.0% vhost-123 [kernel.kallsyms] [k] csum_partial\n'
+               ' 3.0% swapper [kernel.kallsyms] [k] mlx4_en_process_rx_cq\n')
+        rows = analyze_study.profile_self_rows(raw)
+        self.assertEqual(rows, [(3.0, 'swapper', 'mlx4_en_process_rx_cq'), (1.0, 'vhost-123', 'csum_partial')])
+
     def test_local_capture_requires_no_accepted_or_lost_packets(self):
         good = {'exit_code': 0, 'log': '0 packets captured\n0 packets received by filter\n0 packets dropped by kernel\n'}
         self.assertTrue(diagnostics.capture_is_empty(good))

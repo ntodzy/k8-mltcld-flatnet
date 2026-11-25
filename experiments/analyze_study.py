@@ -4,6 +4,7 @@ import argparse
 from collections import defaultdict
 import json
 from pathlib import Path
+import re
 import statistics
 
 import aggregate
@@ -72,6 +73,10 @@ def diagnose(measurement, test='multi'):
                         result[target + '/retrans'].append(retrans)
                     if sent and retrans is not None:
                         result[target + '/retrans_per_1000_outsegs'].append(1000 * retrans / sent)
+                    for metric in ('TcpExt:TCPDSACKRecv', 'TcpExt:TCPSACKReorder', 'TcpExt:TCPTSReorder'):
+                        value = pod.get('netstat_delta', {}).get(metric)
+                        if value is not None:
+                            result[target + '/' + metric].append(value)
                     # Recompute data-socket RTT if early summaries predate its parser.
                     if pod.get('data_rtt_ms'):
                         result[target + '/data_rtt_ms'].append(pod['data_rtt_ms']['mean'])
@@ -100,6 +105,25 @@ def diagnose(measurement, test='multi'):
 def aggregate_data_sockets(output):
     from diagnostics import data_sockets
     return data_sockets(output)
+
+
+def profile_self_rows(output):
+    rows = []
+    idle = ('cpuidle_', 'pv_native_safe_halt', 'native_safe_halt', 'poll_idle', 'default_idle_call', 'arch_cpu_idle', 'do_idle')
+    for line in output.splitlines():
+        match = re.match(r'\s*([\d.]+)%\s+(?:([\d.]+)%\s+)?(.+)', line)
+        if match is None:
+            continue
+        overhead = float(match[2] if match[2] is not None else match[1])
+        rest = match[3]
+        symbol_match = re.search(r'\[(?:k|\.)\]\s+(.+)', rest)
+        if not symbol_match or overhead <= 0:
+            continue
+        symbol = symbol_match[1].strip()
+        if symbol.startswith(idle):
+            continue
+        rows.append((overhead, rest.split()[0], symbol))
+    return sorted(rows, reverse=True)
 
 
 def export_group(output, name, measurements):
@@ -133,6 +157,7 @@ def report(directory, output, partial=False):
         'all-modes': list(main.values()),
         'matched-vxlan': [main[mode] for mode in ('vxlan', 'vm-vxlan-1450', 'host-vxlan-1450') if mode in main],
         'queue-control': [measurements[name] for name in ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored') if name in measurements],
+        'affinity-control': [measurements[name] for name in ('host-1450-two-queues-repeat', 'host-1450-pinned', 'host-1450-unpinned') if name in measurements],
         'attachment-control': [main[mode] for mode in ('direct-1450', 'bridge-1450', 'host-vxlan-1450') if mode in main],
         'mtu-control': [main[mode] for mode in ('native', 'direct-1450', 'vm-vxlan', 'vm-vxlan-1450', 'host-vxlan', 'host-vxlan-1450') if mode in main],
     }
@@ -194,6 +219,21 @@ def report(directory, output, partial=False):
              'The host CPU-s/GB column estimates monitored physical-host busy logical CPUs divided by measured application GB/s. '
              'It includes guest execution, background control-plane work and monitoring, and does not add guest CPU again. '
              'The CPU and application-rate windows are approximately aligned, so this is a resource-cost proxy, not isolated encapsulation cost or energy efficiency.', '',
+             '## Vhost affinity control', '']
+    affinity_rows = []
+    for name in ('host-1450-two-queues-repeat', 'host-1450-pinned', 'host-1450-unpinned'):
+        if name in measurements:
+            m, d = measurements[name], evidence[name]['diagnostics']
+            affinity_rows.append([name, len(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), [])),
+                describe(m['metrics'].get(('TCP_STREAM_MULTI', 'throughput'), []), .001),
+                describe(d.get('worker-1/retrans_per_1000_outsegs', [])), describe(d.get('worker-1/data_rtt_ms', []))])
+    if affinity_rows:
+        text.append(aggregate.table(['Control', 'n', 'Multi Gb/s', 'Sender retrans/1000 OutSegs', 'Sender data RTT ms'], affinity_rows))
+        text.append('Only worker vhost thread CPU masks change in this control. Two distinct physical cores are selected within the NIC NUMA node where available, avoiding SMT siblings and preferring nonzero logical CPU IDs. '
+                    'Guest vCPU and IRQ masks are not pinned. Original masks are restored and a second unpinned run checks reversibility. This is not full NUMA tuning or a contention test.')
+    else:
+        text.append('The affinity controls have not completed.')
+    text += ['',
              '## MTU and attachment effects', '']
     for large, small in [('native', 'direct-1450'), ('vm-vxlan', 'vm-vxlan-1450'), ('host-vxlan', 'host-vxlan-1450'), ('bridge-1450', 'direct-1450')]:
         if large in main and small in main:
@@ -212,7 +252,16 @@ def report(directory, output, partial=False):
                 for line in raw.open():
                     entry = json.loads(line)
                     if entry['kind'] == 'profile_result':
-                        text += [f'### {raw.parent.name}', '', '```text', entry.get('report', {}).get('output', '')[:10000], '```', '']
+                        original = entry.get('report', {}).get('output', '')
+                        profile_dir = output / 'profiles'
+                        profile_dir.mkdir(exist_ok=True)
+                        name = raw.parent.name + '-perf-report.txt'
+                        (profile_dir / name).write_text(original)
+                        text += [f'### {raw.parent.name}', '',
+                                 'Largest self-sample overheads after excluding named idle functions. Percentages use all CPU-clock samples, '
+                                 'including idle time in the denominator; they are not percentages of one vhost thread or of busy time.', '',
+                                 aggregate.table(['Self samples %', 'Command', 'Function'], profile_self_rows(original)[:15]), '',
+                                 f'[Full original perf report](profiles/{name})', '']
                     if entry['kind'] == 'drop_profile_result':
                         report = entry.get('report') or {}
                         text.append(f'Drop trace exit={entry["exit_code"]}; reasons: `{json.dumps(report.get("reasons", {}), sort_keys=True)}`. '
@@ -220,6 +269,8 @@ def report(directory, output, partial=False):
         text += ['', 'Profiles use software CPU-clock sampling; skb drop traces cover up to 15 seconds of a separate diagnostic run. '
                  'Drop reasons and call sites are system-wide and are not proof that every event belongs to the benchmark. '
                  'NOT_SPECIFIED events, particularly buffer-fragment frees at skb_release_data, must not be counted as lost benchmark packets. '
+                 'Linux buffer-consumption/free paths can reach the same fragment cleanup machinery '
+                 '([kernel source](https://github.com/torvalds/linux/blob/v6.8/net/core/skbuff.c)). '
                  'Raw profiles and diagnostic streams remain under the profile attempt. Profile throughput is excluded from the main comparisons.']
     else:
         text.append('Profiling has not completed.')
