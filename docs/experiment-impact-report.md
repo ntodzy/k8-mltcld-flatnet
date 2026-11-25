@@ -68,65 +68,64 @@ the Kubernetes VMs. It is different from our custom TC program on the physical
 hypervisor. Both keep Linux VXLAN. Group labels and exact result directories are
 defined in [the results guide](results-guide.md).
 
-## A — Mode baselines and optimization comparison
+## A — Super table: baseline versus each optimization
 
-The first nine rows are the primary monitored A2 baselines. Original profiles, one guest queue,
-broad CPU masks and default idle behavior were retained while changing each
-mode's required network/MTU configuration. Normal Cilium BPF processing and
-ordinary offloads were still present.
+**One row per experiment; each optimization is a separate column.** All latency
+columns are **µs, lower is better**. “Single” and “Four” are one-stream and
+four-stream TCP throughput in **Gb/s, higher is better**. Values are means;
+standard deviations, sample counts and exact sources remain in the linked
+[complete numerical table](../results/impact-collation-20261125T230019.309151Z/all-metrics.md).
+The table is intentionally wide and can be scrolled horizontally.
+[Download the same super table as CSV](../results/impact-collation-20261125T230019.309151Z/super-table.csv).
 
-| Case / configuration | Additional BPF change | Physical idle policy | Guest queues | Vhost pinning | Single Gb/s ± SD | Four-stream Gb/s ± SD | Mean RR µs ± SD | Average sample P99 µs |
-|---|---|---|---:|---|---:|---:|---:|---:|
-| A2 · Cilium VXLAN | None added | Default | 1 | Auto | 3.143 ± 0.111 | 4.015 ± 0.181 | 821.668 ± 53.065 | 1517.2 |
-| A2 · Native 1500 | None added | Default | 1 | Auto | 5.847 ± 0.569 | 8.858 ± 0.287 | 432.010 ± 265.964 | 1145.0 |
-| A2 · Direct/native 1450 | None added | Default | 1 | Auto | 5.796 ± 0.182 | 8.312 ± 0.583 | 377.368 ± 186.399 | 1194.2 |
-| A2 · VM-local, host-network | None added | Default | 1 | Auto | 12.271 ± 0.674 | 24.080 ± 0.510 | 109.706 ± 1.830 | 195.8 |
-| A2 · Guest VXLAN, inner 1450 | None added | Default | 1 | Auto | 2.608 ± 0.148 | 4.597 ± 0.174 | 964.236 ± 29.301 | 1661.8 |
-| A2 · Guest VXLAN, inner 1500 | None added | Default | 1 | Auto | 2.517 ± 0.081 | 4.486 ± 0.404 | 982.320 ± 43.512 | 1671.8 |
-| A2 · Hypervisor VXLAN, inner 1450 | None added | Default | 1 | Auto | 3.603 ± 0.157 | 3.835 ± 0.109 | 1001.836 ± 12.392 | 1661.6 |
-| A2 · Hypervisor VXLAN, inner 1500 | None added | Default | 1 | Auto | 3.495 ± 0.263 | 4.002 ± 0.188 | 1007.790 ± 16.334 | 1719.0 |
-| A2 · Native bridge 1450 | None added | Default | 1 | Auto | 5.861 ± 0.507 | 8.858 ± 0.258 | 789.898 ± 109.999 | 1439.4 |
-| B2 control · Hypervisor VXLAN | BPF services/masquerading; legacy routing | Default | 1 | Auto | — | — | 1007.952 ± 23.758 | 1745.6 |
-| B2/D · Hypervisor VXLAN | Guest BPF routing + prerequisites | Default | 1 | Auto | 3.808 ± 0.129 | 4.090 ± 0.195 | 810.660 ± 57.375 | 1435.4 |
-| B2/D · Guest VXLAN | Guest BPF routing + prerequisites | Default | 1 | Auto | 3.832 ± 0.200 | 4.698 ± 0.231 | 758.658 ± 178.839 | 1437.4 |
-| B2/D · Fresh Cilium reference | None added | Default | 1 | Auto | 3.242 ± 0.123 | 4.177 ± 0.100 | 759.718 ± 122.518 | 1414.2 |
-| C · Hypervisor VXLAN, legacy control | BPF services/masquerading; legacy routing | 10 µs QoS | 1 | Auto | — | — | 514.108 ± 10.416 | 1019.6 |
-| C · Hypervisor VXLAN | Guest BPF routing + prerequisites | 10 µs QoS | 1 | Auto | — | — | 400.762 ± 15.732 | 817.0 |
-| C · Guest VXLAN | Guest BPF routing + prerequisites | 10 µs QoS | 1 | Auto | — | — | 408.726 ± 52.509 | 879.0 |
-| C · Cilium reference | None added | 10 µs QoS | 1 | Auto | — | — | 400.440 ± 25.327 | 852.2 |
-| E ref · Hypervisor VXLAN, one queue | None added | Default | 1 | Auto | 3.587 ± 0.071 | 4.013 ± 0.130 | 1013.626 ± 24.879 | 1718.4 |
-| E · Hypervisor VXLAN, two queues | None added | Default | 2 | Auto | 3.326 ± 0.130 | 5.601 ± 0.156 | — | — |
-| E ref · Host two queues, unpinned (n=3) | None added | Default | 2 | Auto | — | 5.664 ± 0.035 | — | — |
-| E · Host two queues, pinned vhost | None added | Default | 2 | Pinned | — | 6.427 ± 0.147 | — | — |
-| E ref · Cilium, one queue (n=3) | None added | Default | 1 | Auto | — | 4.148 ± 0.128 | — | — |
-| E · Cilium, two queues | None added | Default | 2 | Auto | 3.318 ± 0.345 | 4.190 ± 0.276 | — | — |
-| E ref · Guest VXLAN, one queue (n=3) | None added | Default | 1 | Auto | — | 4.662 ± 0.136 | — | — |
-| E · Guest VXLAN, two queues | None added | Default | 2 | Auto | 2.607 ± 0.320 | 5.245 ± 0.504 | — | — |
-| B1 smoke · Hypervisor VXLAN (5 s, n=1) | Host TC lookup/pass control | Default | 1 | Auto | — | — | 1023.530 | 1577.0 |
-| B1 smoke · Hypervisor VXLAN (5 s, n=1) | Host TC bridge redirect | Default | 1 | Auto | — | — | 1011.540 | 1614.0 |
+| Experiment | Mean RR: base | Mean RR: BPF | Mean RR: idle only | Mean RR: BPF + idle | Mean RR: TC shortcut | P99: base | P99: BPF | P99: idle only | P99: BPF + idle | P99: TC shortcut | Single: base | Single: BPF | Single: 2Q | Four: base | Four: BPF | Four: 2Q | Four: 2Q + pin |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Cilium VXLAN | 821.7 | — | 400.4 | — | — | 1517.2 | — | 852.2 | — | — | 3.143 | — | 3.318 | 4.015 | — | 4.190 | — |
+| Native 1500 | 432.0 | — | — | — | — | 1145.0 | — | — | — | — | 5.847 | — | — | 8.858 | — | — | — |
+| Direct/native 1450 | 377.4 | — | — | — | — | 1194.2 | — | — | — | — | 5.796 | — | — | 8.312 | — | — | — |
+| VM-local, host-network | 109.7 | — | — | — | — | 195.8 | — | — | — | — | 12.271 | — | — | 24.080 | — | — | — |
+| Guest VXLAN, inner 1450 | 964.2 | 758.7 | — | 408.7 | — | 1661.8 | 1437.4 | — | 879.0 | — | 2.608 | 3.832 | 2.607 | 4.597 | 4.698 | 5.245 | — |
+| Guest VXLAN, inner 1500 | 982.3 | — | — | — | — | 1671.8 | — | — | — | — | 2.517 | — | — | 4.486 | — | — | — |
+| Hypervisor VXLAN, inner 1450 | 1001.8 | 810.7 | 502.4 | 400.8 | 1011.5 | 1661.6 | 1435.4 | 978.7 | 817.0 | 1614.0 | 3.603 | 3.808 | 3.326 | 3.835 | 4.090 | 5.601 | 6.427 |
+| Hypervisor VXLAN, inner 1500 | 1007.8 | — | — | — | — | 1719.0 | — | — | — | — | 3.495 | — | — | 4.002 | — | — | — |
+| Native bridge 1450 | 789.9 | — | — | — | — | 1439.4 | — | — | — | — | 5.861 | — | — | 8.858 | — | — | — |
 
-**Read the flags before comparing values.** Only A2 rows are the original
-mode-only baseline. The B2/D, C, E and B1 rows are follow-up conditions added here
-so the optimization responsible for each measurement is visible in the same
-table. “None added” retains normal Cilium BPF processing and ordinary offloads;
-it does not mean BPF was disabled. “Auto” means broad, unpinned vhost CPU masks.
+**Column key and measurement boundaries:**
 
-BPF guest-routing rows enable kube-proxy replacement and BPF masquerading; the
-B2 legacy control enables those same prerequisites but retains legacy guest
-forwarding. This is different from our B1 physical-host TC bridge redirect.
-A 10 µs idle QoS request applies to both physical hosts and is not a packet
-latency guarantee. No row combines BPF routing, idle tuning, two queues and
-pinning: that configuration was not measured.
+- **Base:** original A2 mode-only configuration, one guest queue, broad CPU masks
+  and default idle policy. Normal Cilium BPF and ordinary offloads remain enabled.
+- **BPF:** supported BPF guest forwarding plus its service/masquerading
+  prerequisites, still one queue and default idle policy. The fresh host
+  prerequisite-matched legacy control was **1008.0 µs mean / 1745.6 µs P99**;
+  that is the closer control for its BPF latency benefit, not the older A2 base.
+- **Idle only:** temporary 10 µs idle QoS with the original forwarding profile.
+  The host entry is the separate three-pair, 20-second screening block
+  (**960.7 → 502.4 µs**). Cilium's fresh default control was
+  **759.7 → 400.4 µs**; no extra BPF profile was applied to Cilium.
+- **BPF + idle:** the measured BPF guest-forwarding profile plus 10 µs idle QoS,
+  with one queue and unpinned vhost tasks. This is an actual combined condition.
+  Cilium is shown under **idle only** because its existing integrated BPF path
+  was retained; it did not receive the separate guest-routing profile.
+- **TC shortcut:** our custom physical-host bridge redirect, **not** the guest
+  BPF routing change. These are single 5-second correctness samples. Its matching
+  TC pass-through control measured **1023.5 µs mean / 1577.0 µs P99**, versus
+  **1011.5 / 1614.0 µs** after redirect; no convincing gain was established.
+- **2Q / 2Q + pin:** two guest NIC queues, then vhost pinning, using the original
+  forwarding profile and default idle behavior. **They do not include BPF routing
+  or idle tuning.** The closer four-stream queue controls were host
+  **4.013 → 5.601**, guest **4.662 → 5.245**, and Cilium **4.148 → 4.190 Gb/s**.
+  The pinning contrast was **5.664 → 6.427 Gb/s** with two queues already active.
 
-A dash means **not measured**. Idle-tuned rows do not inherit default-idle
-throughput; queue/pinning rows do not inherit baseline latency. B2/D latency and
-throughput come from separate collections/boots with the same named profile.
-E reference rows identify the closer controls for queue/affinity gains; use those
-instead of assuming the older A2 run is a paired control. Main full measurements
-have n=5 per available metric; n=3 reference rows and n=1 short B1 correctness
-smokes are labeled explicitly. Reversal measurements remain in Section E and the
-complete collation. Small differences between identically flagged rows from
-different collection blocks are not evidence of an additional optimization.
+**— means not measured.** In particular, throughput with idle tuning, latency
+with queue/pinning changes, TC-shortcut throughput, and the full combination
+BPF + idle + queues + pinning were not measured. They are not filled using
+results from another configuration. The columns are independent branches,
+not a cumulative optimization ladder except where the header explicitly says
+“+”. BPF-profile latency and throughput were measured in separate collections.
+The fresh Cilium throughput reference was **3.242 / 4.177 Gb/s**, versus its
+older base **3.143 / 4.015 Gb/s**; identical flags can still yield different
+values across collection/boot blocks. Use the closer controls above and the
+later sections when attributing gains.
 
 
 Native routing is the strongest cross-host Pod baseline throughput result;
