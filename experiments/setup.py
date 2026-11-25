@@ -78,6 +78,8 @@ def main():
         if base_mode(active['mode']) != 'host-vxlan-1450' or any(
                 active.get(k) != v for k,v in {'physical_mtu':1500,'guest_mtu':1450,'inner_mtu':1450}.items()):
             parser.error('No matching successful host VXLAN MTU-1450 setup to reuse')
+        if active.get('forwarding_profile', 'baseline') != 'baseline':
+            parser.error('Reset is required to restore a modified guest forwarding profile')
         active.update(mode=args.mode, forwarding_profile='baseline')
         if not args.dry_run:save_json(GENERATED/'active-experiment.json', active)
         print('Reuse matching host topology; per-run live TAP/tunnel checks remain required: '+args.mode)

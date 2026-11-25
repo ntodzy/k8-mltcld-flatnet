@@ -11,11 +11,14 @@ BPF_MODES = {
     'host-vxlan-bpf-1450': 'host-vxlan-1450',
     'vm-vxlan-bpf-legacy-1450': 'vm-vxlan-1450',
     'vm-vxlan-bpf-1450': 'vm-vxlan-1450',
+    'host-vxlan-routing-legacy-1450': 'host-vxlan-1450',
+    'host-vxlan-routing-bpf-1450': 'host-vxlan-1450',
 }
-HOST_BPF_MODES = tuple(m for m in BPF_MODES if m.startswith('host-'))
+HOST_BPF_MODES = ('host-vxlan-bpf-pass-1450', 'host-vxlan-bpf-1450')
 VM_BPF_MODES = tuple(m for m in BPF_MODES if m.startswith('vm-'))
+GUEST_ROUTING_MODES = VM_BPF_MODES + ('host-vxlan-routing-legacy-1450', 'host-vxlan-routing-bpf-1450')
 VM_VXLAN_MODES = ('vm-vxlan', 'vm-vxlan-1450') + VM_BPF_MODES
-HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450') + HOST_BPF_MODES
+HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450') + tuple(m for m,b in BPF_MODES.items() if b == 'host-vxlan-1450')
 
 
 def base_mode(mode):
@@ -23,8 +26,8 @@ def base_mode(mode):
 
 
 def forwarding_profile(mode):
-    return ('bpf-legacy' if mode == 'vm-vxlan-bpf-legacy-1450' else
-            'bpf' if mode == 'vm-vxlan-bpf-1450' else 'baseline')
+    return ('bpf-legacy' if mode in ('vm-vxlan-bpf-legacy-1450', 'host-vxlan-routing-legacy-1450') else
+            'bpf' if mode in ('vm-vxlan-bpf-1450', 'host-vxlan-routing-bpf-1450') else 'baseline')
 # Inner IP MTU, guest transport NIC MTU, physical MTU, Cilium MTU override.
 # A guest doing encapsulation needs 50 extra bytes on its transport NIC.
 MTU_PROFILES = {

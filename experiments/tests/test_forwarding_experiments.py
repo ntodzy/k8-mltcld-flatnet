@@ -37,7 +37,7 @@ class ForwardingExperimentTests(unittest.TestCase):
         for mode in common.BPF_MODES:
             configured=setup.deployment_config(source,mode,Path('/tmp/config'))
             self.assertEqual(configured['hypervisors'][0]['network']['mode'],
-                             'bridge' if mode in common.HOST_BPF_MODES else 'direct')
+                             'bridge' if mode in common.HOST_VXLAN_MODES else 'direct')
             inventory=setup.hypervisor_inventory(source,mode,Path('/tmp/ssh'),'10.75.0.0/24')
             self.assertEqual(inventory['all']['vars']['experiment_mode'],common.base_mode(mode))
         self.assertEqual(source,original)
@@ -51,6 +51,19 @@ class ForwardingExperimentTests(unittest.TestCase):
         for key in data:
             broken=dict(data);broken.pop(key)
             with self.assertRaises(ValueError):runner.validate_forwarding(broken,'vm-vxlan-bpf-1450')
+
+    def test_host_tunnel_guest_routing_is_separate_from_host_tc_shortcut(self):
+        for mode in ('host-vxlan-routing-legacy-1450', 'host-vxlan-routing-bpf-1450'):
+            self.assertIn(mode, common.GUEST_ROUTING_MODES)
+            self.assertIn(mode, common.HOST_VXLAN_MODES)
+            self.assertNotIn(mode, common.HOST_BPF_MODES)
+            self.assertNotIn(mode, common.VM_VXLAN_MODES)
+            legacy = common.forwarding_profile(mode) == 'bpf-legacy'
+            runner.validate_forwarding({'kube-proxy-replacement':'true', 'enable-bpf-masquerade':'true',
+                                        'enable-host-legacy-routing':str(legacy).lower()}, mode)
+            status={'routing':{'inter-host-routing-mode':'Native',
+                               'intra-host-routing-mode':'Legacy' if legacy else 'BPF'}}
+            runner.validate_runtime_routing(status,mode)
 
     def test_runtime_routing_uses_pinned_json_api_and_rejects_fallback(self):
         status={'routing':{'inter-host-routing-mode':'Native','intra-host-routing-mode':'Legacy'}}
