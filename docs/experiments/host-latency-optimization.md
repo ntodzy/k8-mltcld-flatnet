@@ -26,6 +26,19 @@ python3 experiments/host_latency_study.py \
   --samples 5 --duration 30 --workloads rr single multi --background
 ```
 
+To validate throughput after the paired latency study without applying the idle
+constraint, use `--workloads single multi --policies default`. For example:
+
+```bash
+python3 experiments/host_latency_study.py \
+  --modes host-vxlan-routing-bpf-1450 vm-vxlan-bpf-1450 vxlan \
+  --samples 5 --duration 30 --workloads single multi --policies default --background
+```
+
+This retains the existing physical NIC configuration and one-queue settings;
+it does not run a separate NIC optimization/restoration preparation stage.
+Single-policy collections provide replicated measurements, not a paired idle-policy effect.
+
 Each sample is a pair of separate Cilium CLI invocations at default hypervisor
 CPU idle policy and a temporary 10 µs latency-QoS request on both physical hosts.
 Pair order alternates AB/BA. VM boots, queues, NIC identities and worker CPU

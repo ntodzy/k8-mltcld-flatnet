@@ -114,7 +114,8 @@ def main():
     csv_file(args.output/'summary.csv',stats);csv_file(args.output/'paired.csv',differences)
     lines=['# Host VXLAN latency optimization'+(' — INTERIM' if args.partial else ''),'',
            'Mean ± sample standard deviation across separate invocations. The same worker-1 → worker-2 Pod TCP endpoints, MTU profiles and diagnostics are used. '
-           'Policies are alternated in balanced AB/BA order within each unchanged VM boot/attachment block. '
+           'When both policies are selected they alternate in balanced AB/BA order within each unchanged VM boot/attachment block; '
+           'single-policy collections retain repetitions without a policy contrast. '
            'Every default case holds the same SSH/descriptor helper as its 10 µs contrast. '
            'Mode changes reset the cluster; cross-mode differences also include different boots and attachments. '
            'Separate studies and durations remain separate groups. Instrumented traces and failed attempts are excluded.','',

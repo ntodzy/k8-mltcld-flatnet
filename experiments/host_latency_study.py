@@ -17,7 +17,7 @@ from cpu_latency import requests, close_requests
 from latency_study import environment, measured
 
 
-def plan(modes, samples, workloads, trace=False):
+def plan(modes, samples, workloads, trace=False, policies=None):
     steps = []
     for mode in modes:
         steps.append(dict(name='prepare-'+mode, kind='setup', mode=mode))
@@ -25,6 +25,8 @@ def plan(modes, samples, workloads, trace=False):
             for pair in range(1, samples+1):
                 # Equal descriptor holders, balanced AB/BA order within a boot.
                 for limit in ([-1, 10] if pair % 2 else [10, -1]):
+                    if policies is not None and limit not in policies:
+                        continue
                     policy = 'default' if limit == -1 else '10us'
                     steps.append(dict(name=f'{mode}-{workload}-pair-{pair}-{policy}',
                                       kind='measurement', mode=mode, pair=pair,
@@ -123,6 +125,8 @@ def main():
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--trace', action='store_true', help='Separate instrumented path validation after each mode')
+    parser.add_argument('--policies', nargs='+', choices=('default','10us'), default=['default','10us'],
+                        help='Idle policies to measure; a single policy collects repetitions without a paired policy contrast')
     args = parser.parse_args()
     if args.samples < 3 or not 15 <= args.duration <= 120:
         parser.error('Use at least three samples and 15–120 seconds per sample')
@@ -137,7 +141,9 @@ def main():
     else:
         directory = (args.output or ROOT/'results'/('host-latency-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))).resolve()
         state = dict(kind='extended-study', study_type='host-latency-optimization',
-                     status='pending', phase='pending', plan=plan(args.modes, args.samples, args.workloads,args.trace),
+                     status='pending', phase='pending',
+                     plan=plan(args.modes, args.samples, args.workloads,args.trace,
+                               [-1 if p=='default' else 10 for p in args.policies]),
                      duration=args.duration, config_sha256=digest,
                      git_snapshot=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
                      created_utc=datetime.now(timezone.utc).isoformat())

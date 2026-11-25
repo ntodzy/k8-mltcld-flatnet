@@ -40,5 +40,12 @@ class HostLatencyStudyTests(unittest.TestCase):
         self.assertEqual(sum(s['kind']=='trace' for s in steps),1)
         self.assertEqual(sum(s['kind']=='measurement' for s in steps),6)
 
+    def test_single_policy_throughput_keeps_every_sample_without_duplicate_contrast(self):
+        steps=plan(['host-vxlan-routing-bpf-1450','vxlan'],5,['single','multi'],policies=[-1])
+        measured=[s for s in steps if s['kind']=='measurement']
+        self.assertEqual(len(measured),20)
+        self.assertEqual({s['cpu_latency_us'] for s in measured},{-1})
+        self.assertEqual({s['pair'] for s in measured},set(range(1,6)))
+
 
 if __name__=='__main__':unittest.main()

@@ -46,7 +46,50 @@ The original reports, paired observations, CPU policy/restoration evidence and
 plots are retained under
 [`results/host-latency-20261125T181639.324738Z/`](../results/host-latency-20261125T181639.324738Z/).
 
-## What the next controls distinguish
+## Shortening guest forwarding while retaining physical VXLAN
+
+The prerequisite-matched **legacy guest-routing control** has now completed
+five 30-second invocations per idle policy within the larger ongoing collection:
+mean 1008.0 ± 23.8 µs under default policy versus 514.1 ± 10.4 µs at 10 µs;
+average sample P99 1745.6 versus 1019.6 µs. These results are close to the original
+legacy host-overlay path. They provide no obvious benefit from enabling BPF
+service handling/masquerading while retaining legacy forwarding. This is a
+separate fresh-boot block, not another set of samples pooled into the initial
+20-second screening block.
+
+Its separate trace observed 19,678/19,676 guest `ip_forward` calls and 9,892/9,894
+physical-host `vxlan_xmit` calls during the approximately 15-second active trace
+window. It therefore confirmed the intended legacy guest/physical tunnel path.
+Trace timings are not included in those uninstrumented means. Evidence:
+[`results/host-latency-20261125T183320.140179Z/`](../results/host-latency-20261125T183320.140179Z/),
+particularly host-vxlan-routing-legacy-1450-instrumented-trace-attempt-1.
+
+The corresponding BPF guest-forwarding block has also completed all five
+30-second observations per policy:
+
+| Guest forwarding, physical VXLAN unchanged | Policy | n | Mean RR latency, µs | Average sample P99, µs |
+|---|---|---:|---:|---:|
+| Prerequisite-matched legacy | Default | 5 | 1007.952 ± 23.758 | 1745.6 |
+| BPF | Default | 5 | 810.660 ± 57.375 | 1435.4 |
+| Prerequisite-matched legacy | 10 µs | 5 | 514.108 ± 10.416 | 1019.6 |
+| BPF | 10 µs | 5 | 400.762 ± 15.732 | 817.0 |
+
+Within each idle-policy condition, BPF forwarding had 19.6% and 22.0% lower
+mean latency than its legacy control, respectively. The combined BPF/10 µs
+configuration was 60.2% below the legacy/default control. Each profile used a
+fresh setup; these are configuration comparisons across separate boots, with
+same-boot paired estimates available for idle-policy effects. They are not an
+exclusive timing estimate for one function or encapsulation headers.
+
+The separate BPF trace recorded **zero guest `ip_forward` calls**, while both
+physical hosts continued to execute Linux VXLAN transmit (12,411/12,408 calls)
+and bridge forwarding (24,724/24,727 calls). The improvement therefore accompanies
+a verified shorter guest path with the original physical bridge and tunnel
+still active. It does not depend on our separate TC bridge shortcut. The
+physical transmit callback's inclusive traced mean remained around 56 µs, and
+vhost handle_tx around 105–107 µs; these overlapping measurements cannot be added
+to reconstruct an end-to-end RTT. Evidence is in the same collection's
+host-vxlan-routing-bpf-1450-instrumented-trace-attempt-1 directory.
 
 Moving VXLAN to a physical hypervisor retains the Pod namespace, guest Cilium
 processing and virtio transport. The previous bridge shortcut removed an
@@ -88,5 +131,6 @@ waited, and TX completion interrupt moderation is not a packet transmit timer.
 
 Reproduction and analysis commands are in
 [the experiment guide](experiments/host-latency-optimization.md). The larger
-comparison is still running/queued; no ranking or combined optimization benefit
-is claimed before those measurements pass.
+custom-guest and Cilium comparisons are still running. The host optimization
+benefit above is measured; its relative ranking against those references is
+not yet established.
