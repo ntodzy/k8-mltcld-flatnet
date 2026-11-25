@@ -138,11 +138,12 @@ power use even when software CPU-time counters do not increase.
 
 The supervised workflow is
 [`results/host-followup-workflow-20261125T194314.961685Z/`](../results/host-followup-workflow-20261125T194314.961685Z/).
-The throughput collection is its **`throughput/`** subdirectory. Its manifest is
-created when the latency study and baseline restoration pass. Until then the
-workflow correctly labels this stage pending.
+The completed throughput collection is its **`throughput/`** subdirectory.
+All 34 steps passed, including restoration, and the parent workflow passed all
+three stages. The final [cohort figures and selections](../results/host-followup-workflow-20261125T194314.961685Z/paper-analysis-complete/report.md)
+and [separate impact report](experiment-impact-report.md) contain the accepted results.
 
-The planned/active selection is five 30-second single-stream and four-stream
+The accepted selection is five 30-second single-stream and four-stream
 runs for `host-vxlan-routing-bpf-1450`, `vm-vxlan-bpf-1450` and `vxlan`, at
 default idle policy and one guest queue. Successful attempts match
 `MODE-{single,multi}-pair-{1..5}-default-attempt-N/measurement/`. Select the
@@ -180,16 +181,22 @@ reports and diagnostics. Tables and figures should say **A mode-only**, **B BPF
 forwarding**, **C idle-policy control**, **D forwarding-only throughput**, or
 **E queue/affinity intervention** explicitly.
 
-## Regenerate the separated paper figures
+## Complete collation and regeneration
 
-After the supervised throughput collection passes:
+The [full collation](../results/impact-collation-20261125T230019.309151Z/all-metrics.md)
+covers 43 primary conditions and five separate correctness cases, including
+queue reversals and paired path controls beyond the A/B/C/D paper figures.
+The [impact report](experiment-impact-report.md) evaluates each change and lists
+missing measurements. No additional experiments were started to fill them.
+
+To regenerate the separated paper figures into a **new** directory:
 
 ```bash
 python3 experiments/analyze_followup.py \
   --baseline results/extended-study-20261125T042706Z \
   --latency results/host-latency-20261125T183320.140179Z \
   --throughput results/host-followup-workflow-20261125T194314.961685Z/throughput \
-  --output results/host-followup-workflow-20261125T194314.961685Z/paper-analysis
+  --output results/host-followup-workflow-20261125T194314.961685Z/paper-analysis-REPRO
 ```
 
 Use the [Matplotlib environment](experiments/aggregation.md). The exporter

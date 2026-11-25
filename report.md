@@ -1,5 +1,9 @@
 # Networking Experiment Suite
 
+[Collated charts and separate impact report](docs/experiment-impact-report.md) cover 43 primary
+conditions and identify which changes improved latency, throughput, both or neither.
+No new suite was run to fill missing combinations.
+
 ## Result groups: mode-only, BPF forwarding, and CPU idle tuning
 
 These are separate experiments. **Approximately 400 µs applies to the improved
@@ -15,7 +19,7 @@ attempts and filters to use from `results/`, including exclusions.
 | **B1 — Our hypervisor TC shortcut** | Did flow-specific TAP↔VXLAN redirect work? | [bpf-integration-smoke-20261125T171045.529636Z](results/bpf-integration-smoke-20261125T171045.529636Z/); correctness-only short runs, not a repeatable speedup estimate |
 | **B2 — BPF guest forwarding** | Can supported BPF routing shorten the VMs' path while retaining custom VXLAN? | [host-latency-20261125T183320.140179Z](results/host-latency-20261125T183320.140179Z/); passed measurement steps with `cpu_latency_us: -1` / `*-default-*` |
 | **C — CPU idle tuning** | What changes when both hypervisors avoid deep idle? | Same host-latency collection, `cpu_latency_us: 10` / `*-10us-*`, paired against the same mode and pair number's default case |
-| **D — BPF-profile throughput** | Does the forwarding improvement preserve single/four-stream throughput? | [supervised workflow's throughput collection](results/host-followup-workflow-20261125T194314.961685Z/throughput/); default idle only; status/results updated after completion |
+| **D — BPF-profile throughput** | Does the forwarding improvement preserve single/four-stream throughput? | [supervised workflow's throughput collection](results/host-followup-workflow-20261125T194314.961685Z/throughput/); completed; default idle only; five samples per workload |
 | **E — Queues and affinity** | Can backend parallelism improve throughput? | Separate intervention/reversal steps in the extended study; never merge into A's baseline |
 
 ### A — No additional optimizations: switch the networking mode
@@ -100,7 +104,7 @@ trace evidence and the supporting three-pair screening block.
 
 ### D — Throughput validation: forwarding profiles, default idle policy
 
-The supervised continuation collects five 30-second single-stream and four-stream
+The supervised continuation completed five 30-second single-stream and four-stream
 samples for improved host VXLAN, BPF guest VXLAN and Cilium. It keeps one guest
 queue, broad CPU masks, existing physical NIC settings and **default CPU idle
 policy**. This checks throughput tradeoffs from the forwarding configurations.
@@ -109,11 +113,28 @@ latency collection's final restoration before starting and restores the original
 host profile after completing throughput validation. Its raw location and
 acceptance rules are in [group D of the results guide](docs/results-guide.md#d--throughput-validation-bpf-profiles-default-idle-policy-only).
 
-Throughput validation is still queued/running; no new throughput estimate is
-claimed here until successful measurements are available. The approximately
-6.43 Gb/s host result discussed later is **E: two queues plus vhost affinity on
-the older forwarding profile**, not this BPF-only result or a measured combined
-BPF/idle/queue configuration.
+All 34 throughput steps passed, including restoration. These are five 30-second
+observations per workload, with mean ± sample SD:
+
+| Current configuration, default idle | Single Gb/s | Four-stream Gb/s |
+|---|---:|---:|
+| Hypervisor VXLAN + BPF guest forwarding | 3.808 ± 0.129 | 4.090 ± 0.195 |
+| Guest VXLAN + BPF forwarding | 3.832 ± 0.200 | 4.698 ± 0.231 |
+| Fresh Cilium VXLAN reference | 3.242 ± 0.123 | 4.177 ± 0.100 |
+
+The host's roughly 6% improvement against its older A2 baseline is modest and
+crosses collection/boot blocks; there is no fresh prerequisite-matched throughput
+control. The guest configuration's single-stream gain is much larger, about 47%,
+while its four-stream gain is only 2%. The latest host and guest single-flow
+rates are similar, but guest four-stream throughput remains higher. See
+[the separate impact report](docs/experiment-impact-report.md) for effect sizes,
+variation, controls and every unavailable combination, and
+[the completed cohort tables/figures](results/host-followup-workflow-20261125T194314.961685Z/paper-analysis-complete/report.md)
+for accepted sources.
+
+The approximately 6.43 Gb/s host result discussed later is **E: two queues plus
+vhost affinity on the older forwarding profile**, not this BPF-only result or a
+measured combined BPF/idle/queue configuration.
 
 
 ## Supporting diagnostics: matched paths and kernel observations

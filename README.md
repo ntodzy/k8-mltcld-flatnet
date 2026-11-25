@@ -66,6 +66,7 @@ This resets the cluster between modes and saves all results together.
 
 - [Completed study results and methodology](report.md)
 - [Which result folders to use: baseline, BPF, idle and throughput](docs/results-guide.md)
+- [Collated charts and measured impact of each experiment](docs/experiment-impact-report.md)
 - [VXLAN packet paths and bypass options](docs/vxlan-datapath-and-bypass.md)
 - [Collect CPU, queue, offload, and TCP diagnostics](docs/experiments/diagnostics.md)
 - [Aggregate attempts into tables and graphs](docs/experiments/aggregation.md)

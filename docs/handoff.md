@@ -1,5 +1,56 @@
 # Work handoff
 
+## Completed supervised collection and impact collation — November 25
+
+The user explicitly requested NO MORE CODE OR TESTS except bug fixes, no new
+suite to fill missing data, and a collated numeric impact report. Those constraints
+apply to future continuation too. This work is COMPLETE; do not restart collections.
+
+- Latency study results/host-latency-20261125T183320.140179Z/ passed49/49.
+- Throughput results/host-followup-workflow-20261125T194314.961685Z/throughput/
+  passed34/34; parent workflow passed3/3. Final setup restored host-vxlan-1450.
+  Local active-experiment.json is baseline, inner/guest1450 physical1500;
+  no path-control or forwarding-control marker remains. This is collector/local
+  state verification, not a new live SSH audit.
+- D results (five30s each, DEFAULT idle, one queue): hostBPF single3.808±.129,
+  multi4.090±.195Gb/s; guestBPF single3.832±.200,multi4.698±.231;
+  Cilium single3.242±.123,multi4.177±.100. No idle-tuned throughput was measured.
+- Existing tools produced workflow/paper-analysis-complete/ and analysis-all/.
+  The earlier paper-analysis/ directory is empty from an interrupted attempt;
+  preserve it; completed report is paper-analysis-complete/report.md.
+- Full collation: results/impact-collation-20261125T230019.309151Z/.
+  43 primary conditions/364 ordinary workload invocations, plus5 separate
+  short correctness cases. all-tests-overview.svg/png, all-throughput.svg/png,
+  all-latency.svg/png; all-metrics.md/CSV, cases.json, raw-observations.csv,
+  collation.json and excluded-instrumentation.json. Generated data/figures only;
+  no new script or tests were written for collation. Instrumented/failed runs
+  and superseded exploratory data are excluded from efficacy claims.
+- New separate report docs/experiment-impact-report.md describes every test
+  family/control/reversal, effect sizes, evidence strength and missing cells.
+  docs/results-guide.md is the exact-attempt index; report.md separates A
+  mode-only, B1 custom TC correctness, B2 supported guest forwarding, C idles,
+  D default-idle throughput, E queues/affinity. Report does NOT claim combined
+  best latency/throughput/queue tuning was measured.
+
+Main findings: host guest-BPF routing lowers matched-prerequisite RR1008→811µs
+(~20%); idle tuning lowers means46–51% across allfour profiles (20/20positive
+paired reductions), converging optimized overlays near400µs. Host throughput
++5.7%/+6.7% versus old baseline is modest/confounded by temporal variation;
+Cilium reference also gained3–4% without optimization. Guest BPF configuration
+single-stream +46.9%, multi+2.2% (no clear gain). Queues improve host multi+39.6%
+but single−7.3%; pinning adds13.5% with reversal. Cilium queue gain1% not clear;
+guest queues12.5% more variable. Custom TC smoke1.2%mean gain/P99worse is not
+convincing. Larger MTU gives no consistent win. Paired tunnel penalties224/257µs
+are complete-path latency, not isolated header-writing time.
+
+The command-scoped CPU wrapper was previously unit-validated (118tests passed
+before the latest no-tests instruction). Its optional live smoke was NOT run;
+do not start it to satisfy obsolete notes. Default lease-capable helper worked
+through the completed throughput collection. No pushes. Latest changes are
+reports/README only and are saved in the final local documentation commit. Nothing
+else is required for this task.
+
+
 ## Active host VXLAN latency optimization follow-up (November 25)
 
 User explicitly reopened investigation: fix host-placement latency; full benchmarks

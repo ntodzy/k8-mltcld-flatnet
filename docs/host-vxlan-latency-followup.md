@@ -1,7 +1,7 @@
 # Host VXLAN latency follow-up
 
-The repeated latency comparison is complete; throughput validation is supervised
-separately. This follow-up extends the earlier completed studies;
+The repeated latency comparison and separate default-idle throughput validation
+are complete. This follow-up extends the earlier completed studies;
 the paper's original mode measurements remain unchanged. The question is whether
 we can make hypervisor encapsulation competitive without conflating tunnel
 placement, guest forwarding, host bridge forwarding and CPU idle policy.
@@ -185,6 +185,10 @@ and [the configuration exported by ethtool](https://github.com/torvalds/linux/bl
 Reproduction and analysis commands are in
 [the experiment guide](experiments/host-latency-optimization.md). The larger
 latency comparison has passed all 49 steps including restoration. Throughput
-validation is supervised separately at default idle policy only. The baseline,
+validation has also passed all 34 steps at default idle policy only. The baseline,
 BPF and idle conditions must remain distinct; use [the result-selection index](results-guide.md)
 for exact accepted source directories and exclusions.
+
+The [separate experiment impact report](experiment-impact-report.md) now collates
+all accepted latency/throughput conditions, evaluates effect sizes and makes
+missing combinations explicit. Its charts use saved measurements only.
