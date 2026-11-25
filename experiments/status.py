@@ -43,7 +43,7 @@ def progress(state):
     return text, status
 
 
-def monitor(manifest, watch=False, interval=60, sleep=time.sleep):
+def monitor(manifest, watch=False, interval=300, sleep=time.sleep):
     print(f'Results: {manifest.parent}', flush=True)
     print(f'Log: {manifest.parent / "collection.log"}', flush=True)
     previous = None
@@ -66,7 +66,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, help='Select a result directory; default is the latest collection/comparison')
     parser.add_argument('--watch', action='store_true', help='Check periodically and print only changed progress')
-    parser.add_argument('--interval', type=int, default=60, help='Seconds between watch checks (default: 60)')
+    parser.add_argument('--interval', type=int, default=300, help='Seconds between watch checks (default: 300)')
     args = parser.parse_args()
     if args.interval < 1:
         parser.error('--interval must be positive')

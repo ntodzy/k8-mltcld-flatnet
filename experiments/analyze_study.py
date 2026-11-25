@@ -47,6 +47,13 @@ def diagnose(measurement, test='multi'):
             continue
         cores_busy = 0
         for target, data in targets.items():
+            queue_sets = [[value for key, value in counters.items()
+                           if re.fullmatch(r'rx(?:\d+|_queue_\d+)_packets', key) and value >= 0]
+                          for counters in data.get('nic_counter_delta', {}).values()]
+            queues = max(queue_sets, key=sum, default=[])
+            if sum(queues) > 0:
+                result[target + '/rx_active_queues'].append(sum(value > max(1000, sum(queues) * .01) for value in queues))
+                result[target + '/rx_largest_queue_percent'].append(100 * max(queues) / sum(queues))
             if target.startswith('hypervisor-'):
                 count = data.get('logical_cpus', len(data.get('per_core', {})) - 1)
                 busy = data.get('per_core', {}).get('cpu', {}).get('busy_percent')
@@ -258,6 +265,20 @@ def report(directory, output, partial=False):
             'Background traffic is included in the NIC counter. Bidirectional tcpdump can see local macvtap frames at the lower device taps '
             'without physical transmission '
             '([Linux macvlan forwarding source](https://github.com/torvalds/linux/blob/v6.8/drivers/net/macvlan.c#L497)).', '']
+    queue_distribution = []
+    for mode, measurement in main.items():
+        if mode == 'vm-local':
+            continue
+        d = evidence[measurement['step']['name']]['diagnostics']
+        queue_distribution.append([mode, describe(d.get('hypervisor-node2/rx_active_queues', [])),
+            describe(d.get('hypervisor-node2/rx_largest_queue_percent', [])),
+            describe(d.get('worker-2/rx_active_queues', []))])
+    text += [aggregate.table(['Mode', 'Receiver-host significant RX queues', 'Largest physical RX queue share %',
+                              'Receiver-VM significant RX queues'], queue_distribution), '',
+             'Queue statistics use whole-invocation vendor packet-counter deltas on the interface with the most queue RX packets. '
+             'A significant queue exceeds both 1000 packets and 1% of the summed queue packets. '
+             'These describe packet distribution, not an exact number of flows; background traffic and unequal flow rates remain possible. '
+             'Physical distribution across several queues can coexist with a single guest queue or a busy vhost thread.', '']
     queue_names = ('host-1450-baseline', 'host-1450-two-queues', 'host-1450-restored')
     table = []
     for name in queue_names:

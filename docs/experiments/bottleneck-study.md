@@ -64,7 +64,7 @@ in `collection.json`, writes `collection.log`, and never overwrites an earlier
 attempt. Successful steps are skipped on resume. Changing the base deployment
 configuration is rejected. A failed measurement restarts that measurement in a
 new attempt; it does not silently reuse incomplete samples. Status checks now
-default to 60 seconds, can be set to 300 seconds, and print only changed progress.
+default to 300 seconds, can be changed with `--interval`, and print only changed progress.
 Packet/CPU sampling remains about once a second; orchestration status polling
 and the scientific sampling interval serve different purposes.
 
