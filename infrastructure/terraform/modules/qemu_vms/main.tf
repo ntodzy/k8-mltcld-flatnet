@@ -6,6 +6,11 @@ locals {
         model = { type = "virtio" }
         mac   = { address = lower(vm.mac_address) }
       },
+      # Libvirt only accepts an MTU element for tap-backed attachments.
+      # Direct/macvtap MTUs are reconciled on the host by experiment setup.
+      var.network.mode == "direct" ? {} : {
+        mtu = { size = var.network.mtu }
+      },
       var.network.mode == "direct" ? {
         source = { direct = { dev = var.network.source, mode = "bridge" } }
         } : var.network.mode == "bridge" ? {

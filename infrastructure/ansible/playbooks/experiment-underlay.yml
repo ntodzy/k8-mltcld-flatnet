@@ -1,0 +1,80 @@
+---
+- name: Prepare the physical experiment underlay
+  hosts: hypervisors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Inspect a previous shared tunnel service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cs740-host-vxlan.service
+      register: experiment_host_vxlan
+
+    - name: Disable previous shared tunnel startup
+      ansible.builtin.systemd_service:
+        name: cs740-host-vxlan
+        state: stopped
+        enabled: false
+      when: experiment_host_vxlan.stat.exists
+
+    - name: Inspect previous experiment underlay service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cs740-experiment-underlay.service
+      register: experiment_underlay_service
+
+    - name: Stop previous underlay settings and remove its managed VTEP address
+      ansible.builtin.systemd_service:
+        name: cs740-experiment-underlay
+        state: stopped
+        enabled: false
+      when: experiment_underlay_service.stat.exists
+
+    - name: Remove the previous experiment tunnel before rebuilding it
+      ansible.builtin.shell: |
+        if ip link show dev cs740hvx >/dev/null 2>&1; then
+          ip link delete cs740hvx
+        fi
+      changed_when: true
+
+    - name: Write persistent physical experiment interface settings
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/cs740-experiment-underlay
+        mode: '0755'
+        content: |
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          if [[ "${1:-}" == down ]]; then
+          {% if experiment_mode == 'host-vxlan' %}
+            ip address del {{ vxlan_underlay_ipv4 | quote }}/{{ experiment_underlay_prefix | int }} dev {{ vxlan_underlay_interface | quote }} 2>/dev/null || true
+          {% endif %}
+            exit 0
+          fi
+          [[ "${1:-}" == up ]] || exit 2
+          ip link set dev {{ vxlan_underlay_interface | quote }} mtu {{ experiment_underlay_mtu | int }} up
+          {% if experiment_mode == 'host-vxlan' %}
+          ip address replace {{ vxlan_underlay_ipv4 | quote }}/{{ experiment_underlay_prefix | int }} dev {{ vxlan_underlay_interface | quote }}
+          {% endif %}
+
+    - name: Install physical experiment interface service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cs740-experiment-underlay.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=CS740 experiment underlay MTU and VTEP address
+          Wants=network-online.target
+          After=network-online.target
+          Before=cs740-host-vxlan.service libvirtd.service
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/cs740-experiment-underlay up
+          ExecStop=/usr/local/sbin/cs740-experiment-underlay down
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Apply underlay settings
+      ansible.builtin.systemd_service:
+        name: cs740-experiment-underlay
+        state: restarted
+        enabled: true
+        daemon_reload: true

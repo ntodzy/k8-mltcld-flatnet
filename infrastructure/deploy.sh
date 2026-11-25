@@ -122,6 +122,7 @@ jq -e '
     (.management_network.cidr | nonempty) and
     (.network.mode | valid_mode) and
     (.network.source | nonempty) and
+    (.network.mtu // 1500 | integer_at_least(1280) and . <= 9000) and
     (.vms | type == "array" and length > 0) and
     (all(.vms[];
       (.name | test("^[a-zA-Z0-9][a-zA-Z0-9.-]*$")) and

@@ -45,11 +45,17 @@ variable "network" {
   type = object({
     mode   = string
     source = string
+    mtu    = optional(number, 1500)
   })
 
   validation {
     condition     = contains(["direct", "bridge", "network"], var.network.mode)
     error_message = "network.mode must be direct, bridge, or network."
+  }
+
+  validation {
+    condition     = var.network.mtu >= 1280 && var.network.mtu <= 9000 && floor(var.network.mtu) == var.network.mtu
+    error_message = "network.mtu must be an integer between 1280 and 9000."
   }
 }
 

@@ -1,0 +1,58 @@
+---
+- name: Reset Kubernetes while preserving VMs and SSH access
+  hosts: virtual_machines
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Inspect any custom VM tunnel service
+      ansible.builtin.stat:
+        path: /etc/systemd/system/cs740-vxlan.service
+      register: reset_vxlan_service
+
+    - name: Stop and disable VM tunnel forwarding
+      ansible.builtin.systemd_service:
+        name: cs740-vxlan
+        state: stopped
+        enabled: false
+      when: reset_vxlan_service.stat.exists
+
+    - name: Check whether kubeadm is installed
+      ansible.builtin.stat:
+        path: /usr/bin/kubeadm
+      register: reset_kubeadm
+
+    - name: Remove kubeadm cluster membership and local control-plane state
+      ansible.builtin.command:
+        argv: [kubeadm, reset, --force, '--cri-socket=unix:///run/containerd/containerd.sock']
+      when: reset_kubeadm.stat.exists
+      changed_when: true
+
+    - name: Check whether kubelet is installed
+      ansible.builtin.stat:
+        path: /usr/bin/kubelet
+      register: reset_kubelet
+
+    - name: Keep kubelet stopped until the next cluster apply
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: stopped
+        enabled: false
+      when: reset_kubelet.stat.exists
+
+    - name: Remove persistent cluster and CNI state
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      loop:
+        - /etc/cni/net.d
+        - /var/lib/cni
+        - /var/lib/cilium
+        - /run/cilium
+        - /etc/kubernetes
+        - '/home/{{ ansible_user }}/.kube/config'
+        - /etc/systemd/system/cs740-vxlan.service
+        - /usr/local/sbin/cs740-vxlan
+
+    - name: Reboot to clear kernel routes, BPF state, interfaces, and firewall rules
+      ansible.builtin.reboot:
+        reboot_timeout: 600

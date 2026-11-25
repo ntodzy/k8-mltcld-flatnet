@@ -62,6 +62,11 @@ run "plans_direct_virtio_guests" {
   }
 
   assert {
+    condition     = module.qemu_vms.virtual_machines.controller.libvirt_mtu == null
+    error_message = "Direct/macvtap attachments must omit the unsupported libvirt MTU element."
+  }
+
+  assert {
     condition     = module.qemu_vms.virtual_machines.controller.disk_gib == 20
     error_message = "The configured system disk capacity must reach the VM module."
   }
@@ -91,6 +96,11 @@ run "plans_linux_bridge_guests" {
     condition     = module.qemu_vms.virtual_machines.controller.network_source == "br0"
     error_message = "The selected Linux bridge must reach the VM module."
   }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.libvirt_mtu == 1500
+    error_message = "Bridge attachments must retain their supported libvirt MTU element."
+  }
 }
 
 run "plans_libvirt_network_guests" {
@@ -106,5 +116,27 @@ run "plans_libvirt_network_guests" {
   assert {
     condition     = module.qemu_vms.virtual_machines.controller.network_mode == "network"
     error_message = "The selected libvirt network must reach the VM module."
+  }
+}
+
+run "plans_native_mtu_vxlan_underlay" {
+  command = plan
+
+  variables {
+    network = {
+      mode   = "direct"
+      source = "eno1d1"
+      mtu    = 1550
+    }
+  }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.network_mtu == 1550
+    error_message = "The requested 1550-byte underlay MTU must remain available to experiment setup."
+  }
+
+  assert {
+    condition     = module.qemu_vms.virtual_machines.controller.libvirt_mtu == null
+    error_message = "Jumbo direct interfaces must also omit the unsupported libvirt MTU element."
   }
 }

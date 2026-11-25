@@ -31,6 +31,7 @@ variable "network" {
   type = object({
     mode   = string
     source = string
+    mtu    = optional(number, 1500)
   })
 }
 

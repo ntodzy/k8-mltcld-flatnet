@@ -1,0 +1,18 @@
+---
+- name: Prepare hypervisors using existing SSH credentials
+  hosts: hypervisors
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Verify experiment NIC exists and is separate from the default-route interface
+      ansible.builtin.assert:
+        that:
+          - hypervisor_experiment_interface in ansible_facts.interfaces
+          - hypervisor_experiment_interface != ansible_facts.get('default_ipv4', {}).get('interface', '')
+          - hypervisor_experiment_interface != ansible_facts.get('default_ipv6', {}).get('interface', '')
+        fail_msg: The experiment NIC must exist and must not be the management/default-route NIC.
+      when: not hypervisor_audit_only | bool
+  roles:
+    - role: qemu_host
+      when: not hypervisor_audit_only | bool
+    - role: hypervisor_network

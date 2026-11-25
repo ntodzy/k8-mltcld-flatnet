@@ -1,0 +1,71 @@
+---
+- name: Set live direct/macvtap MTUs before configuring guest experiment NICs
+  hosts: hypervisors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reconcile host macvtap interfaces for direct attachment modes
+      when: experiment_mode != 'host-vxlan'
+      block:
+        - name: Install the macvtap MTU helper
+          ansible.builtin.copy:
+            src: ../files/set-macvtap-mtu.py
+            dest: /usr/local/sbin/cs740-macvtap-mtu
+            owner: root
+            group: root
+            mode: '0755'
+        - name: Set only each managed VM's experiment macvtap MTU
+          ansible.builtin.command:
+            argv:
+              - /usr/local/sbin/cs740-macvtap-mtu
+              - --domain
+              - '{{ item.name }}'
+              - --mac
+              - '{{ item.mac_address }}'
+              - --parent
+              - '{{ vxlan_underlay_interface }}'
+              - --mtu
+              - '{{ experiment_guest_mtu }}'
+          loop: '{{ experiment_vms }}'
+          register: experiment_macvtap_mtu
+          changed_when: (experiment_macvtap_mtu.stdout | from_json).changed
+
+- name: Set the experiment NIC MTU without changing management networking
+  hosts: virtual_machines
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Persist the guest experiment MTU in netplan
+      ansible.builtin.copy:
+        dest: /etc/netplan/99-cs740-experiment-mtu.yaml
+        mode: '0600'
+        content: |
+          network:
+            version: 2
+            ethernets:
+              experiment:
+                mtu: {{ experiment_guest_mtu | int }}
+    - name: Validate and generate the merged netplan configuration
+      ansible.builtin.command: netplan generate
+      changed_when: false
+    - name: Apply the MTU to just the experiment NIC
+      ansible.builtin.command:
+        argv: [ip, link, set, dev, experiment, mtu, '{{ experiment_guest_mtu }}']
+      changed_when: true
+
+- name: Remove an unused shared host bridge after guests have been detached
+  hosts: hypervisors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Delete only an empty experiment bridge
+      ansible.builtin.shell: |
+        if ip link show dev cs740br >/dev/null 2>&1; then
+          if [ -n "$(ls -A /sys/class/net/cs740br/brif)" ]; then
+            echo 'cs740br still has attached ports; refusing to delete it' >&2
+            exit 1
+          fi
+          ip link delete cs740br
+        fi
+      when: experiment_mode != 'host-vxlan'
+      changed_when: true

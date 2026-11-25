@@ -56,7 +56,8 @@
       "required": ["mode", "source"],
       "properties": {
         "mode": { "enum": ["direct", "bridge", "network"] },
-        "source": { "type": "string", "minLength": 1 }
+        "source": { "type": "string", "minLength": 1 },
+        "mtu": { "type": "integer", "minimum": 1280, "maximum": 9000, "default": 1500 }
       },
       "additionalProperties": false
     },

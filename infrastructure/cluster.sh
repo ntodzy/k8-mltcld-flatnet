@@ -12,11 +12,12 @@ action="apply"
 
 usage() {
   cat <<'EOF'
-Usage: ./cluster.sh [-i FILE] [--network-mode MODE] [apply|validate]
+Usage: ./cluster.sh [-i FILE] [--network-mode MODE] [apply|reset|validate]
 
 Builds the kubeadm cluster described by the generated guest inventory. The
 validate action performs local Ansible syntax validation and does not contact
-any VM or hypervisor.
+any VM or hypervisor. The reset action removes Kubernetes/Cilium state and
+reboots guests, preserving VM disks and SSH keys.
 
 Options:
   -i, --inventory FILE  Guest inventory (default: generated/guest_inventory.json)
@@ -43,7 +44,7 @@ while (($# > 0)); do
       network_mode="$2"
       shift 2
       ;;
-    apply|validate)
+    apply|reset|validate)
       action="$1"
       shift
       ;;
@@ -92,7 +93,11 @@ export ANSIBLE_CONFIG="${ANSIBLE_DIR}/ansible.cfg"
 export ANSIBLE_LOCAL_TEMP="$(mktemp -d /tmp/cs740-cluster.XXXXXXXX)"
 trap 'rm -rf -- "${ANSIBLE_LOCAL_TEMP}"' EXIT
 
-playbook_args=(-i "${inventory_file}" "${ANSIBLE_DIR}/playbooks/install-kubernetes.yml")
+playbook="${ANSIBLE_DIR}/playbooks/install-kubernetes.yml"
+if [[ "${action}" == "reset" ]]; then
+  playbook="${ANSIBLE_DIR}/playbooks/reset-kubernetes.yml"
+fi
+playbook_args=(-i "${inventory_file}" "${playbook}")
 if [[ -n "${network_mode}" ]]; then
   playbook_args+=(--extra-vars "cilium_network_mode=${network_mode}")
 fi

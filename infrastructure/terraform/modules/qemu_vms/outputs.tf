@@ -17,6 +17,9 @@ output "virtual_machines" {
       base_volume    = libvirt_volume.base.name
       network_mode   = var.network.mode
       network_source = var.network.source
+      # Requested MTU; direct interfaces intentionally omit libvirt's MTU XML.
+      network_mtu = var.network.mtu
+      libvirt_mtu = try(vm.devices.interfaces[1].mtu.size, null)
     }
   }
 }

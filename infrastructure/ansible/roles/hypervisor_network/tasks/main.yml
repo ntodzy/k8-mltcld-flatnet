@@ -1,0 +1,93 @@
+---
+- name: Install NIC inspection and tuning tools
+  ansible.builtin.apt:
+    name: [ethtool, iproute2]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: not hypervisor_audit_only | bool
+
+- name: Configure persistent host NIC profile
+  when: not hypervisor_audit_only | bool
+  block:
+    - name: Create private NIC configuration/state directory
+      ansible.builtin.file:
+        path: /var/lib/cs740-network
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Install the host network configuration utility
+      ansible.builtin.copy:
+        src: configure-network.py
+        dest: /usr/local/sbin/cs740-host-network
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Write selected NIC profile
+      ansible.builtin.copy:
+        dest: /var/lib/cs740-network/config.json
+        owner: root
+        group: root
+        mode: '0600'
+        content: >-
+          {{ {'interface': hypervisor_experiment_interface,
+              'profile': hypervisor_network_profile,
+              'queues': hypervisor_network_queues} | to_nice_json }}
+    - name: Install persistent host NIC tuning service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cs740-host-network.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=CS740 experiment NIC offloads and optional queues
+          Wants=network-online.target
+          After=network-online.target cs740-experiment-underlay.service
+          Before=cs740-host-vxlan.service
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/cs740-host-network
+          [Install]
+          WantedBy=multi-user.target
+    - name: Apply and persist NIC configuration
+      ansible.builtin.systemd_service:
+        name: cs740-host-network
+        state: restarted
+        enabled: "{{ hypervisor_network_profile == 'optimized' }}"
+        daemon_reload: true
+
+- name: Inspect host networking
+  ansible.builtin.command:
+    argv: '{{ item }}'
+  loop:
+    - [uname, -r]
+    - [ip, -j, -d, link, show, dev, '{{ hypervisor_experiment_interface }}']
+    - [ethtool, -i, '{{ hypervisor_experiment_interface }}']
+    - [ethtool, -k, '{{ hypervisor_experiment_interface }}']
+    - [ethtool, -l, '{{ hypervisor_experiment_interface }}']
+    - [sysctl, net.bridge.bridge-nf-call-iptables, net.bridge.bridge-nf-call-ip6tables]
+    - [virsh, -c, 'qemu:///system', list, --all]
+  register: hypervisor_network_audit
+  changed_when: false
+  failed_when: false
+
+- name: Create the local audit report directory
+  ansible.builtin.file:
+    path: '{{ hypervisor_report_dir }}'
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Save host capabilities and effective settings locally
+  ansible.builtin.copy:
+    dest: '{{ hypervisor_report_dir }}/{{ inventory_hostname }}.json'
+    mode: '0600'
+    content: >-
+      {{ {'host': inventory_hostname, 'interface': hypervisor_experiment_interface,
+          'audit_only': hypervisor_audit_only, 'requested_profile': hypervisor_network_profile,
+          'checks': hypervisor_network_audit.results} | to_nice_json }}
+  delegate_to: localhost
+  become: false

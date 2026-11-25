@@ -6,4 +6,9 @@ infrastructure/generated/
 
 # Local deployment configuration may contain hostnames and key paths.
 infrastructure/config.json
+infrastructure/config.json.bak
 
+
+# Generated experiment measurements and Python bytecode.
+results/
+__pycache__/
