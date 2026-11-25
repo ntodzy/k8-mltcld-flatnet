@@ -18,6 +18,17 @@ from test_diagnostics import record
 
 
 class BottleneckTests(unittest.TestCase):
+    def test_vhost_workers_include_qemu_task_group_members_and_legacy_processes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            proc = Path(temp)
+            for relative, name in [('100/comm', 'qemu-system-x86'), ('100/task/100/comm', 'qemu-system-x86'),
+                                   ('100/task/101/comm', 'vhost-100'), ('102/comm', 'vhost-100'),
+                                   ('103/comm', 'vhost-999')]:
+                path = proc / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(name)
+            self.assertEqual(affinity_agent.vhost_tasks(100, proc), [101, 102])
+
     def test_affinity_selects_distinct_physical_cores_and_parses_numa_cpu_ranges(self):
         self.assertEqual(affinity_agent.cpulist('0-2,4,6-7'), {0, 1, 2, 4, 6, 7})
         with tempfile.TemporaryDirectory() as temp:

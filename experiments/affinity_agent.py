@@ -37,6 +37,21 @@ def choose_cpus(allowed, topology_root=Path('/sys/devices/system/cpu')):
     raise ValueError('Two distinct physical cores are required for the affinity control')
 
 
+def vhost_tasks(qemu, proc_root=Path('/proc')):
+    # Newer kernels expose vhost workers inside QEMU's task group; older
+    # kernels can expose separate kernel processes. /proc lists only leaders.
+    candidates = [*proc_root.iterdir(), *(proc_root / str(qemu) / 'task').iterdir()]
+    tids = set()
+    for entry in candidates:
+        if entry.name.isdigit():
+            try:
+                if (entry / 'comm').read_text().strip() == f'vhost-{qemu}':
+                    tids.add(int(entry.name))
+            except OSError:
+                pass
+    return sorted(tids)
+
+
 def main():
     domain, interface, action = sys.argv[1:]
     if not re.fullmatch(r'worker-[A-Za-z0-9.-]+', domain) or action not in ('pin', 'restore'):
@@ -49,16 +64,9 @@ def main():
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup = backup_dir / f'{domain}-{qemu}.json'
     if action == 'pin':
-        tids = []
-        for entry in Path('/proc').iterdir():
-            if entry.name.isdigit():
-                try:
-                    if (entry / 'comm').read_text().strip() == f'vhost-{qemu}':
-                        tids.append(int(entry.name))
-                except OSError:
-                    pass
+        tids = vhost_tasks(qemu)
         if not tids:
-            raise ValueError('No kernel vhost threads found for this worker')
+            raise ValueError('No vhost worker tasks found for this domain')
         existing = json.loads(backup.read_text()) if backup.exists() else None
         if existing is not None and existing['qemu_starttime'] != starttime(qemu):
             raise ValueError('Affinity backup belongs to a different QEMU process lifetime')

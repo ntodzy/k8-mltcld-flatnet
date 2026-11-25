@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 from pathlib import Path
+import subprocess
 
 from common import GENERATED, ROOT, guests, remote, save_json
 
@@ -16,8 +17,11 @@ def configure(action, output):
     result = []
     for vm in ('worker-1', 'worker-2'):
         host = hosts[vm]['hypervisor']
-        result.append(json.loads(remote(GENERATED / 'ssh_config', 'cs740-' + host + '-jump',
-                     ['sudo', '-n', 'python3', '-c', agent, vm, parents[host], action])))
+        try:
+            result.append(json.loads(remote(GENERATED / 'ssh_config', 'cs740-' + host + '-jump',
+                         ['sudo', '-n', 'python3', '-c', agent, vm, parents[host], action])))
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(f'{host}/{vm}: affinity {action} failed with status {error.returncode}; see remote traceback in collection.log') from None
     save_json(output, result)
 
 
