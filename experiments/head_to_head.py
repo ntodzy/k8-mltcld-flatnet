@@ -325,7 +325,8 @@ def execute(directory, state):
         # Always restore the original architecture's baseline, including on failure.
         restoration = directory/('restoration-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
         restoration.mkdir()
-        state['phase'] = 'restoring-baseline'
+        outcome = state['status']
+        state.update(status='running', phase='restoring-baseline', measurement_status=outcome)
         write_manifest(directory, state)
         try:
             restore_affinity(restoration)
@@ -342,6 +343,7 @@ def execute(directory, state):
             finally:
                 close_requests(holders)
             state['restoration'] = dict(status='passed', directory=restoration.name, mode=state['restore_mode'])
+            state['status'] = outcome
         except BaseException as error:
             state['restoration'] = dict(status='failed', directory=restoration.name, error=str(error))
             state.update(status='failed', error=state.get('error', '')+'; restoration failed: '+str(error))

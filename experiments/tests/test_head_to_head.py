@@ -246,5 +246,24 @@ class HeadToHeadTests(unittest.TestCase):
             self.assertEqual(revised['plan'][0]['attempts'][0]['source_revision'],0)
             self.assertEqual((d/'collection.json').read_text(),original)
 
+    def test_failed_collection_stays_running_until_baseline_restoration_finishes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            state=dict(plan=[dict(name='case',mode='vxlan',profile='baseline',status='pending',attempts=[])],
+                       restore_mode='vxlan')
+            observed=[]
+            def during_restore(*args):
+                current=json.loads((root/'collection.json').read_text())
+                observed.append((current['status'],current['phase'],current['measurement_status']))
+            with patch.object(study,'restore_affinity'),patch.object(study,'execute_case',side_effect=RuntimeError('injected measurement failure')), \
+                 patch.object(study,'run_logged',side_effect=during_restore),patch.object(study.queues,'configure'), \
+                 patch.object(study,'environment',return_value={}),patch.object(study,'host_audit',return_value={}), \
+                 patch.object(study,'validate_audit'),patch.object(study,'requests',return_value=[]), \
+                 patch.object(study,'validate_policy'),patch.object(study,'close_requests'):
+                with self.assertRaisesRegex(RuntimeError,'injected measurement failure'):study.execute(root,state)
+            self.assertEqual(observed,[('running','restoring-baseline','failed')])
+            self.assertEqual(state['status'],'failed')
+            self.assertEqual(state['restoration']['status'],'passed')
+
 
 if __name__=='__main__':unittest.main()
