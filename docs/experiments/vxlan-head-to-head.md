@@ -4,15 +4,19 @@ Compare three architectures, each with baseline and optimized settings:
 
 | Architecture | Baseline mode | Optimized mode |
 |---|---|---|
-| Cilium VXLAN over macvtap | `vxlan` | `vxlan-bpf` |
-| Cilium VXLAN over TAP/Linux bridge | `vxlan-bridge` | `vxlan-bridge-bpf` |
-| Native Cilium over hypervisor VXLAN | `host-vxlan-1450` | `host-vxlan-routing-bpf-1450` |
+| Cilium VXLAN over macvtap | [`vxlan`](vxlan.md) | [`vxlan-bpf`](vxlan-bpf.md) |
+| Cilium VXLAN over TAP/Linux bridge | [`vxlan-bridge`](vxlan-bridge.md) | [`vxlan-bridge-bpf`](vxlan-bridge-bpf.md) |
+| Native Cilium over hypervisor VXLAN | [`host-vxlan-1450`](host-vxlan-1450.md) | [`host-vxlan-routing-bpf-1450`](host-vxlan-routing-bpf-1450.md) |
 
 The Cilium bridge connects the physical experiment NIC to `cs740br`, without
 a host tunnel. The provider bridge connects TAPs to `cs740hvx`; its physical
 NIC stays outside that bridge and transports VXLAN. There is one tunnel layer
 in either architecture. Management networking and existing SSH keys are preserved.
 Base `infrastructure/config.json` remains unchanged; bridge configs are generated.
+The provider tunnel also carries VM node/control-plane traffic. Cilium's guest
+tunnel carries the Pod overlay, with node traffic using the VM underlay. This
+is part of the complete architecture comparison: CPU monitoring includes that
+background work, while path-validation filters select benchmark Pod traffic.
 
 ## Profiles and controls
 
@@ -151,8 +155,12 @@ averaged within each rebuild; independent rebuild means receive equal weight.
 P99 is an average of invocation P99 values, not a pooled transaction percentile.
 Contrasts retain block identity and report absolute/percentage changes for
 profile, attachment and placement comparisons. CPU busy-core observations for
-guests and hosts retain workload identity in CSV/JSON.
+guests and hosts retain workload identity in CSV/JSON. Physical-host CPU totals
+already include VM execution; guest and host CPU values must not be added
+together as independent costs.
 
 Optimized-versus-baseline measures a package, not each setting's independent
 effect. Equal attachment types reduce confounding but do not make all forwarding
 steps identical. Conclusions must remain scoped to this hardware and workload.
+RR and throughput are separate workloads in the same configuration; this study
+does not measure request latency during concurrent throughput saturation.

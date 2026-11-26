@@ -1,35 +1,59 @@
 # Work handoff
 
-## Reopened: six-cell VXLAN head-to-head implementation
+## Completed: six-cell VXLAN head-to-head implementation — November 25
 
-The user explicitly authorized implementing the planned tests and temporarily
-reducing repetitions/duration for development. This supersedes the earlier
-no-code/no-tests restriction **for this task**. Implement three architectures
-(Cilium macvtap, Cilium bridge, host VXLAN), each baseline/optimized. Do not
-automatically launch the 12–14 hour primary collection while validating code.
-Starting snapshot is 8f2e33b; do not push. Existing results remain unchanged.
-See docs/experiments/vxlan-head-to-head.md for the workflow and boundaries.
+The user explicitly authorized implementing the planned comparison and reducing
+trials/duration for development, superseding the earlier no-code/no-tests rule
+for this task. Implementation and development validation are COMPLETE. No
+collection remains active. Do not restart the smoke or automatically launch the
+primary collection; the user has not requested its 12–14 hour execution yet.
+Starting snapshot was 8f2e33b. All changes are local commits; nothing was pushed.
 
-Implementation checkpoint: 0831da4. Short live six-cell smoke started at
-`results/vxlan-head-to-head-20261126T001447.410947Z/` (background PID in its
-`pid` file). Do not launch another setup or collection while it owns the lock.
-Use `python3 experiments/status.py --directory RESULTS_DIR` for status. Local
-unit checks currently pass 131 tests (one optional dependency skip); Ansible
-syntax checks and the optimized VXLAN cluster validation pass. The master
-report renderer was checked with synthetic data under /tmp, not research data.
-No primary collection has started. Final live status will be recorded below.
-The initial smoke passed optimized Cilium/macvtap and optimized host VXLAN,
-then stopped during baseline host path validation: control-plane traffic filled
-the 2,000-frame capture cap before benchmark traffic on one host. All retained
-PCAPs/failed attempts are preserved. The fix filters inner TCP to both worker
-Pod CIDRs, then still validates exact benchmark Pod IPs. The workflow is restoring
-the host baseline before a deliberate development-only source-revision resume.
-Primary source changes still require a new collection. Latest checks: 137 tests,
-one optional dependency skip. Baseline live agents were separately verified as
-kube-proxy replacement False / masquerading iptables; supplemental proof is
-in the failed baseline attempt's additional-profile-proof.json.
-Older
-completed studies and reports below remain valid historical evidence.
+- New coordinator: `experiments/head_to_head.py`; three architectures × baseline/
+  optimized profiles. Cilium macvtap, Cilium TAP/Linux bridge, native guest Cilium
+  over hypervisor VXLAN. Original default eight modes remain unchanged.
+- Baseline retains ordinary Cilium BPF/offloads and kube-proxy, one queue, broad
+  vhost masks, default idle. Optimized adds supported guest BPF forwarding,
+  kube-proxy replacement/BPF masquerading, two queues, vhost pinning and temporary
+  physical-host 10 µs idle QoS. The physical-host custom TC shortcut is excluded.
+- Full procedure and standalone mode links: `docs/experiments/vxlan-head-to-head.md`.
+  Primary command: `python3 experiments/head_to_head.py --background` (3 rebuild
+  blocks × 6 cells × 5 repetitions × 3 workloads = 270 invocations, 30 seconds).
+  CLI dry-run was checked; **no primary collection has started**.
+- Development collection `results/vxlan-head-to-head-20261126T001447.410947Z/`
+  PASSED all 6 cells / 18 ordinary workload invocations (one repetition, 3 seconds).
+  Every case has separate excluded captures proving expected Pod TCP/VXLAN path,
+  outer-MTU DF ping, live routing/profile checks and guest/hypervisor diagnostics.
+- Initial baseline-host capture failed because node/control-plane TCP filled the
+  2,000-packet cap before the benchmark. The parser was not weakened: capture
+  filters now select inner TCP between the live worker Pod CIDRs, and decoding
+  still requires the exact benchmark Pod IP pair. Failed attempt/PCAPs remain.
+- Development resumed deliberately across immutable source revisions 0/0831da4
+  (first two passed optimized cases) and 1/cfb8282 (remaining four cells, including
+  baseline host attempt 2). `--accept-smoke-source-change` is explicitly rejected
+  for primary data. These mixed short development results are NOT efficacy data.
+- Final smoke report/charts/CSV/JSON: `.../analysis-smoke-final/report.md`.
+  Earlier `analysis-first-case/` and `analysis-four-cases/` are retained interim
+  outputs. Existing paper reports/results were not changed or pooled with smoke.
+- Final LIVE restoration PASSED at `restoration-20261126T015939.237089Z/`:
+  host-vxlan-1450 baseline, physical MTU1500 / bridge+guest+Pod1450, one queue,
+  original broad vhost masks, both physical-host idle requests restored to
+  2000000000 µs. Local active-experiment.json agrees. All six saved hardware
+  fingerprints were checked against the fixed reference.
+- Local validation: 139 unit tests run, one optional dependency skip; all others
+  pass. Changed Ansible playbooks passed syntax checks, cluster.sh accepted the
+  Cilium VXLAN BPF profile, and new bridge profiles succeeded on live libvirt.
+  Master report rendering was checked against both synthetic and live data.
+- Code checkpoints: 0831da4 feature; 4eab810 profile/deployment guards; 46cf74e
+  capture fix/development source history; cfb8282 cleanup-status fix; b14ac98
+  startup-status fix (unit validated; packet-path code unchanged). Latest
+  coordinator publishes starting/preflight immediately and stays running until
+  baseline restoration completes. Source snapshots cover deployment/templates/
+  Terraform/helpers without copying credentials or generated inventories.
+
+The original paper evidence below remains historical and valid. The new smoke
+numbers cannot establish optimization benefits; use a fresh primary collection
+under one fixed source revision for those conclusions.
 
 ## Completed supervised collection and impact collation — November 25
 
