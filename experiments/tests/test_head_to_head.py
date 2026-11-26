@@ -265,5 +265,18 @@ class HeadToHeadTests(unittest.TestCase):
             self.assertEqual(state['status'],'failed')
             self.assertEqual(state['restoration']['status'],'passed')
 
+    def test_resume_publishes_live_preflight_before_slow_remote_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);state=dict(status='failed',error='old failure',plan=[],restore_mode='vxlan')
+            observed=[]
+            def fail_preflight(*args):
+                observed.append(json.loads((root/'collection.json').read_text()))
+                raise RuntimeError('unreachable during preflight')
+            with patch.object(study,'restore_affinity',side_effect=fail_preflight):
+                with self.assertRaisesRegex(RuntimeError,'unreachable during preflight'):study.execute(root,state)
+            self.assertEqual(observed[0]['status'],'running')
+            self.assertEqual(observed[0]['phase'],'preflight')
+            self.assertNotIn('error',observed[0])
+
 
 if __name__=='__main__':unittest.main()

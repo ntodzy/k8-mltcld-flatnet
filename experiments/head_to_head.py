@@ -290,8 +290,10 @@ def execute_case(work, step, state, directory):
 
 
 def execute(directory, state):
-    state.update(status='running', pid=os.getpid())
+    state.update(status='running', phase='preflight', pid=os.getpid())
     state.pop('error', None)
+    state.pop('measurement_status', None)
+    write_manifest(directory, state)
     try:
         # Resuming never reuses a possibly half-tuned previous boot.
         preflight = directory/('preflight-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
@@ -452,6 +454,8 @@ def main():
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes((ROOT/name).read_bytes())
         if args.background:
+            state.update(status='starting', phase='preflight')
+            state.pop('error', None)
             write_manifest(directory, state)
             sys.stdout.flush()
             pid = os.fork()
