@@ -2,6 +2,7 @@
 """Six-cell VXLAN architecture/profile comparison, with rebuild-level identity."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import copy
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -55,6 +56,37 @@ def profile_settings(profile):
                 affinity='pinned' if profile == 'optimized' else 'original',
                 cpu_latency_us=10 if profile == 'optimized' else -1,
                 forwarding='bpf' if profile == 'optimized' else 'baseline')
+
+
+def hardware_fingerprint(env, audit):
+    """Compare fixed hardware settings across cells, excluding intended changes."""
+    result = {}
+    for label, data in env.items():
+        if label.startswith('hypervisor-'):
+            result[label] = {k:data[k] for k in ('boot_id','kernel','policy')}
+        else:
+            xml = ET.fromstring(audit[label]['xml'])
+            memory = xml.find('memory')
+            result[label] = dict(kernel=data['kernel'], vcpus=xml.findtext('vcpu'),
+                                 memory=memory.text, memory_unit=memory.get('unit'))
+    return copy.deepcopy(result)
+
+
+def validate_services(data, proxy_present, profile, statuses):
+    optimized = profile == 'optimized'
+    expected = str(optimized).lower()
+    if data.get('kube-proxy-replacement') != expected or data.get('enable-bpf-masquerade', 'false') != expected:
+        raise ValueError('Service/masquerade settings do not match the profile')
+    if proxy_present == optimized:
+        raise ValueError('kube-proxy presence does not match the profile')
+    if set(statuses) != {'worker-1','worker-2'}:
+        raise ValueError('Both live Cilium agents require service/masquerade proof')
+    for vm, status in statuses.items():
+        proxy = str(status.get('kube-proxy-replacement', {}).get('mode', '')).lower()
+        masquerading = status.get('masquerading', {})
+        wanted = 'bpf' if optimized else 'iptables'
+        if proxy != expected or str(masquerading.get('mode', '')).lower() != wanted or not masquerading.get('enabled'):
+            raise ValueError('Live service/masquerade mode does not match the profile: '+vm)
 
 
 def command(mode, workload, duration, output):
@@ -195,8 +227,29 @@ def execute_case(work, step, state, directory):
         save_json(work/'environment.json', env)
         save_json(work/'attachment-audit.json', audit)
         validate_audit(mode, profile, audit, env)
+        fingerprint = hardware_fingerprint(env, audit)
+        if fingerprint != state.setdefault('hardware_reference', fingerprint):
+            raise ValueError('Physical host policy/boot/kernel or guest kernel/resources changed across configurations')
         from head_to_head_path import validate_path
         validate_path(work/'path-validation', mode, state['smoke'])
+        from run import KUBECTL
+        inventory = guests(GENERATED/'guest_inventory.json')
+        controller = next(name for name,h in inventory.items() if h['cs740_role']=='controller')
+        daemonsets = json.loads(remote(GENERATED/'ssh_config', controller,
+                                     KUBECTL+['-n','kube-system','get','daemonsets','-o','json']))
+        save_json(work/'daemonsets.json', daemonsets)
+        config = json.loads((work/'path-validation/measurement/cilium-config.json').read_text())
+        statuses = {}
+        for vm in ('worker-1','worker-2'):
+            pods = json.loads(remote(GENERATED/'ssh_config', controller, KUBECTL+
+                ['-n','kube-system','get','pods','-l','k8s-app=cilium','--field-selector','spec.nodeName='+vm,'-o','json']))
+            if len(pods['items']) != 1:
+                raise ValueError('Cannot identify unique Cilium agent for '+vm)
+            pod = pods['items'][0]['metadata']['name']
+            statuses[vm] = json.loads(remote(GENERATED/'ssh_config', controller, KUBECTL+
+                ['-n','kube-system','exec',pod,'--','cilium-dbg','status','--output','json']))
+        save_json(work/'profile-status.json', statuses)
+        validate_services(config['data'], any(d['metadata']['name']=='kube-proxy' for d in daemonsets['items']), profile, statuses)
         for sample in range(1, state['samples'] + 1):
             # Rotate workload ordering within each configuration/boot.
             shift = (sample + step['block'] - 2) % len(WORKLOADS)
@@ -299,6 +352,18 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def source_files():
+    files = set((ROOT/'experiments').glob('*.py'))
+    for folder in ('infrastructure/ansible', 'infrastructure/terraform'):
+        for path in (ROOT/folder).rglob('*'):
+            if path.is_file() and not any(p.startswith('.') for p in path.relative_to(ROOT/folder).parts):
+                if path.suffix in ('.py','.sh','.tf','.j2','.yml','.yaml','.tpl','.cfg'):
+                    files.add(path)
+    files.update(ROOT/name for name in ('infrastructure/cluster.sh', 'infrastructure/deploy.sh',
+                                        'infrastructure/kubernetes/cluster-config.yml'))
+    return sorted(files)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--blocks', type=int, default=3)
@@ -318,8 +383,7 @@ def main():
     if args.resume and args.output:
         parser.error('--resume and --output are mutually exclusive')
     digest = hashlib.sha256((ROOT/'infrastructure/config.json').read_bytes()).hexdigest()
-    source_files = sorted((ROOT/'experiments').glob('*.py')) + sorted((ROOT/'infrastructure/ansible').rglob('*.yml')) + sorted((ROOT/'infrastructure/ansible').rglob('*.j2')) + [ROOT/'infrastructure/cluster.sh']
-    hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files}
+    hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files()}
     if args.resume:
         directory = args.resume.resolve()
         state = json.loads((directory/'collection.json').read_text())

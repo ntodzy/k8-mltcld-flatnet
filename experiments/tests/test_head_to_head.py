@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import common
@@ -13,7 +14,7 @@ import setup
 import run as runner
 import head_to_head as study
 import head_to_head_path as path_check
-from analyze_head_to_head import block_means, summarize, contrasts
+from analyze_head_to_head import block_means, summarize, contrasts, load
 
 
 class HeadToHeadTests(unittest.TestCase):
@@ -118,6 +119,87 @@ class HeadToHeadTests(unittest.TestCase):
             elif mutation=='queues':broken['worker-1']['xml']=broken['worker-1']['xml'].replace('queues="2"','queues="1"')
             else:broken['worker-1']['xml']=broken['worker-1']['xml'].replace('type="bridge"','type="direct"')
             with self.assertRaises(ValueError):study.validate_audit(mode,'optimized',broken,env)
+
+    def test_partial_pin_failure_restores_affinity_before_replacing_queues(self):
+        events=[]
+        def configure(*args,**kwargs):events.append('queues-'+str(kwargs['queues']))
+        def pin(*args):
+            events.append('pin')
+            raise RuntimeError('injected partial pin failure')
+        with tempfile.TemporaryDirectory() as tmp, patch.object(study,'run_logged'), \
+             patch.object(study.queues,'configure',side_effect=configure), \
+             patch.object(study.affinity,'configure',side_effect=pin), \
+             patch.object(study,'restore_affinity',side_effect=lambda _:events.append('restore')):
+            with self.assertRaisesRegex(RuntimeError,'partial pin'):
+                study.execute_case(Path(tmp),dict(mode='vxlan-bpf',profile='optimized'),{},Path(tmp))
+        self.assertEqual(events,['queues-2','pin','restore','queues-1'])
+
+    def test_failed_affinity_restoration_does_not_replace_threads(self):
+        events=[]
+        with tempfile.TemporaryDirectory() as tmp, patch.object(study,'run_logged'), \
+             patch.object(study.queues,'configure',side_effect=lambda *a,**kw:events.append(kw['queues'])), \
+             patch.object(study.affinity,'configure',side_effect=RuntimeError('partial pin')), \
+             patch.object(study,'restore_affinity',side_effect=RuntimeError('restoration failed')):
+            with self.assertRaisesRegex(RuntimeError,'restoration failed'):
+                study.execute_case(Path(tmp),dict(mode='vxlan-bpf',profile='optimized'),{},Path(tmp))
+        self.assertEqual(events,[2])
+
+    def test_policy_rejects_expiry_external_constraints_and_wrong_effective_limit(self):
+        def holder(before=study.DEFAULT_QOS,effective=10,expired=False):
+            return SimpleNamespace(records=[dict(kind='ready',before_us=before,effective_us=effective)],
+                                   process=SimpleNamespace(poll=lambda:0 if expired else None))
+        study.validate_policy([holder(),holder()],'optimized')
+        for bad in (holder(before=10),holder(effective=100),holder(expired=True)):
+            with self.assertRaises(ValueError):study.validate_policy([holder(),bad],'optimized')
+        with self.assertRaises(ValueError):study.validate_policy([holder()],'optimized')
+
+    def test_service_profile_rejects_stale_proxy_or_masquerade_state(self):
+        for profile, proxy, flag in [('baseline',True,'false'),('optimized',False,'true')]:
+            data={'kube-proxy-replacement':flag,'enable-bpf-masquerade':flag}
+            statuses={vm:{'kube-proxy-replacement':{'mode':flag},
+                          'masquerading':{'mode':'BPF' if profile=='optimized' else 'IPTables','enabled':True}}
+                      for vm in ('worker-1','worker-2')}
+            study.validate_services(data,proxy,profile,statuses)
+            with self.assertRaises(ValueError):study.validate_services(data,not proxy,profile,statuses)
+            data['enable-bpf-masquerade']='false' if flag=='true' else 'true'
+            with self.assertRaises(ValueError):study.validate_services(data,proxy,profile,statuses)
+        # The pinned chart omits the disabled masquerade flag. Live agent proof
+        # is still required; an omitted config key alone is not runtime proof.
+        del data['enable-bpf-masquerade']
+        data['kube-proxy-replacement']='false'
+        for status in statuses.values():
+            status['kube-proxy-replacement']['mode']='False'
+            status['masquerading']['mode']='IPTables'
+        study.validate_services(data,True,'baseline',statuses)
+        statuses['worker-1']['masquerading']['mode']='BPF'
+        with self.assertRaises(ValueError):study.validate_services(data,True,'baseline',statuses)
+
+    def test_fixed_hardware_identity_excludes_guest_reboots_and_queue_changes(self):
+        env={'worker-1':dict(kernel='6.8',boot_id='first'),
+             'hypervisor-a':dict(kernel='6.8',boot_id='host-boot',policy={'nic':'unchanged'})}
+        audit={'worker-1':dict(xml='<domain><vcpu>2</vcpu><memory unit="KiB">4096</memory></domain>')}
+        first=study.hardware_fingerprint(env,audit)
+        env['worker-1']['boot_id']='second'
+        self.assertEqual(first,study.hardware_fingerprint(env,audit))
+        env['hypervisor-a']['policy']['nic']='changed'
+        self.assertNotEqual(first,study.hardware_fingerprint(env,audit))
+
+    def test_source_snapshot_covers_deployment_without_credentials_or_generated_files(self):
+        paths={str(p.relative_to(common.ROOT)) for p in study.source_files()}
+        self.assertIn('infrastructure/deploy.sh',paths)
+        self.assertIn('infrastructure/terraform/modules/qemu_vms/main.tf',paths)
+        self.assertIn('infrastructure/ansible/files/set-macvtap-mtu.py',paths)
+        self.assertIn('infrastructure/kubernetes/cluster-config.yml',paths)
+        self.assertNotIn('infrastructure/config.json',paths)
+        self.assertFalse(any('/generated/' in p or '/.terraform/' in p for p in paths))
+
+    def test_incomplete_collection_requires_partial_and_excludes_failed_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            state=dict(study_type='vxlan-head-to-head',status='failed',plan=[dict(status='failed',attempts=[])])
+            (root/'collection.json').write_text(json.dumps(state))
+            with self.assertRaisesRegex(ValueError,'incomplete'):load(root)
+            self.assertEqual(load(root,partial=True)[1],[])
 
 
 if __name__=='__main__':unittest.main()

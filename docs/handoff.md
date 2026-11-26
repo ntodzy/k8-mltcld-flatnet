@@ -10,7 +10,15 @@ automatically launch the 12–14 hour primary collection while validating code.
 Starting snapshot is 8f2e33b; do not push. Existing results remain unchanged.
 See docs/experiments/vxlan-head-to-head.md for the workflow and boundaries.
 
-Development validation status will be recorded here when complete. Older
+Implementation checkpoint: 0831da4. Short live six-cell smoke started at
+`results/vxlan-head-to-head-20261126T001447.410947Z/` (background PID in its
+`pid` file). Do not launch another setup or collection while it owns the lock.
+Use `python3 experiments/status.py --directory RESULTS_DIR` for status. Local
+unit checks currently pass 131 tests (one optional dependency skip); Ansible
+syntax checks and the optimized VXLAN cluster validation pass. The master
+report renderer was checked with synthetic data under /tmp, not research data.
+No primary collection has started. Final live status will be recorded below.
+Older
 completed studies and reports below remain valid historical evidence.
 
 ## Completed supervised collection and impact collation — November 25

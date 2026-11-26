@@ -15,7 +15,7 @@ import sys
 import time
 
 from collect import run_logged, write_manifest
-from common import GENERATED, ROOT, guests, remote, save_json
+from common import GENERATED, ROOT, CILIUM_TUNNEL_MODES, guests, remote, save_json
 from latency_trace import TraceSession
 from path_control import MARKER, switch
 
@@ -112,7 +112,7 @@ def measured(command, work, mode, trace):
     try:
         if trace:
             for label, (target, domain, interface) in targets().items():
-                tunnel = 'cs740hvx' if domain else 'cilium_vxlan' if mode == 'vxlan' else 'cs740vx'
+                tunnel = 'cs740hvx' if domain else 'cilium_vxlan' if mode in CILIUM_TUNNEL_MODES else 'cs740vx'
                 devices = [interface, tunnel] + (['cs740br'] if domain else [])
                 sessions[label] = TraceSession(target, dict(domain=domain, tunnel=tunnel, devices=devices, duration=15), work / 'traces' / label)
             deadline = time.monotonic() + 150
