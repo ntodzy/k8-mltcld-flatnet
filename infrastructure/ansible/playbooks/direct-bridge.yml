@@ -7,8 +7,8 @@
     - name: Require this control's fixed MTU profile
       ansible.builtin.assert:
         that:
-          - experiment_mode == 'bridge-1450'
-          - experiment_guest_mtu | int == 1450
+          - experiment_direct_bridge | default(false) | bool
+          - experiment_guest_mtu | int in [1450, 1500]
           - experiment_underlay_mtu | int == 1500
 
     - name: Reject an experiment interface carrying a default management route
@@ -38,7 +38,7 @@
           fi
           ip link set dev {{ vxlan_underlay_interface | quote }} mtu 1500 up
           ip link set dev {{ vxlan_underlay_interface | quote }} master cs740br
-          ip link set dev cs740br mtu 1450 up
+          ip link set dev cs740br mtu {{ experiment_guest_mtu | int }} up
 
     - name: Install the persistent direct bridge control service
       ansible.builtin.copy:

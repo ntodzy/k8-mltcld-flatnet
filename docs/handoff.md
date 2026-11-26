@@ -1,5 +1,18 @@
 # Work handoff
 
+## Reopened: six-cell VXLAN head-to-head implementation
+
+The user explicitly authorized implementing the planned tests and temporarily
+reducing repetitions/duration for development. This supersedes the earlier
+no-code/no-tests restriction **for this task**. Implement three architectures
+(Cilium macvtap, Cilium bridge, host VXLAN), each baseline/optimized. Do not
+automatically launch the 12–14 hour primary collection while validating code.
+Starting snapshot is 8f2e33b; do not push. Existing results remain unchanged.
+See docs/experiments/vxlan-head-to-head.md for the workflow and boundaries.
+
+Development validation status will be recorded here when complete. Older
+completed studies and reports below remain valid historical evidence.
+
 ## Completed supervised collection and impact collation — November 25
 
 The user explicitly requested NO MORE CODE OR TESTS except bug fixes, no new

@@ -208,8 +208,12 @@ def main():
                         direction = spec.get('direction', 'inout')
                         if direction not in ('in', 'out', 'inout'):
                             raise ValueError('Unsupported capture direction')
+                        limit = spec.get('packet_limit')
+                        if limit is not None and (not isinstance(limit, int) or not 1 <= limit <= 10000):
+                            raise ValueError('Capture packet limit must be 1–10000')
                         capture = subprocess.Popen(['tcpdump', '-n', '-U', '-Q', direction, '-i', spec['interface'],
-                            '-s', '128', '-w', str(workspace / 'capture.pcap'), spec['filter']],
+                            '-s', '128', '-w', str(workspace / 'capture.pcap')] +
+                            (['-c', str(limit)] if limit is not None else []) + [spec['filter']],
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=capture_log,
                             start_new_session=True)
                         ready_by = time.monotonic() + 10

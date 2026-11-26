@@ -10,7 +10,7 @@ from pathlib import Path
 import shlex
 import subprocess
 
-from common import GENERATED, MODES, ALL_MODES, ROOT, HOST_VXLAN_MODES, guests, remote, save_json, mtu_profile, base_mode, forwarding_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, HOST_VXLAN_MODES, DIRECT_BRIDGE_MODES, guests, remote, save_json, mtu_profile, base_mode, forwarding_profile
 
 
 def deployment_config(source, mode, config_dir):
@@ -24,7 +24,7 @@ def deployment_config(source, mode, config_dir):
             raise ValueError('Base config must use direct experiment NIC attachments; '
                              'keep bridge changes in the generated experiment config.')
         host['network']['mtu'] = mtu_profile(mode)['guest_mtu']
-        if mode in HOST_VXLAN_MODES or mode == 'bridge-1450':
+        if mode in HOST_VXLAN_MODES or mode in DIRECT_BRIDGE_MODES:
             host['network'] = {'mode': 'bridge', 'source': 'cs740br', 'mtu': mtu_profile(mode)['guest_mtu']}
     return config
 
@@ -50,6 +50,7 @@ def hypervisor_inventory(config, mode, ssh_config, subnet):
         }
     return {'all': {'children': {'hypervisors': {'hosts': hosts}}, 'vars': {
         'experiment_mode': base_mode(mode),
+        'experiment_direct_bridge': mode in DIRECT_BRIDGE_MODES,
         'experiment_underlay_mtu': mtu_profile(mode)['physical_mtu'],
         'experiment_inner_mtu': mtu_profile(mode)['inner_mtu'],
         'experiment_guest_mtu': mtu_profile(mode)['guest_mtu'],
@@ -104,7 +105,7 @@ def main():
     commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'experiment-underlay.yml')])
     if args.mode in HOST_VXLAN_MODES:
         commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'host-vxlan.yml')])
-    if args.mode == 'bridge-1450':
+    if args.mode in DIRECT_BRIDGE_MODES:
         commands.append(['ansible-playbook', '-i', str(host_file), str(playbooks / 'direct-bridge.yml')])
     commands += [
         [str(ROOT / 'infrastructure/deploy.sh'), '--config', str(config_file), '--auto-approve', 'apply'],

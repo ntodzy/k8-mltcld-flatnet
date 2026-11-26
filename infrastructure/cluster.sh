@@ -78,8 +78,8 @@ case "${forwarding_profile}" in
   baseline|bpf-legacy|bpf) ;;
   *) die "forwarding profile must be baseline, bpf-legacy, or bpf" ;;
 esac
-if [[ "${forwarding_profile}" != baseline && "${network_mode}" != vm-vxlan-1450 && "${network_mode}" != host-vxlan-1450 ]]; then
-  die "BPF forwarding profiles require a custom VXLAN MTU-1450 mode"
+if [[ "${forwarding_profile}" != baseline && "${network_mode}" != vm-vxlan-1450 && "${network_mode}" != host-vxlan-1450 && "${network_mode}" != vxlan ]]; then
+  die "BPF forwarding profiles require VXLAN or a custom VXLAN MTU-1450 mode"
 fi
 command -v jq >/dev/null 2>&1 || die "required command not found: jq"
 if [[ "${action}" == "validate" && "${inventory_was_selected}" == false && ! -r "${inventory_file}" ]]; then

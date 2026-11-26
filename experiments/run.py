@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import uuid
 
-from common import GENERATED, MODES, ALL_MODES, ROOT, VM_VXLAN_MODES, HOST_BPF_MODES, VM_BPF_MODES, GUEST_ROUTING_MODES, guests, remote, save_json, ssh_command, mtu_profile, forwarding_profile
+from common import GENERATED, MODES, ALL_MODES, ROOT, VM_VXLAN_MODES, HOST_BPF_MODES, VM_BPF_MODES, GUEST_ROUTING_MODES, CILIUM_TUNNEL_MODES, guests, remote, save_json, ssh_command, mtu_profile, forwarding_profile
 
 KUBECTL = ['sudo', '-n', 'kubectl', '--kubeconfig=/etc/kubernetes/admin.conf']
 CILIUM = ['sudo', '-n', '/usr/local/bin/cilium', '--kubeconfig=/etc/kubernetes/admin.conf']
@@ -63,8 +63,9 @@ def validate_forwarding(data, mode):
 def validate_runtime_routing(status, mode):
     wanted = 'Legacy' if forwarding_profile(mode) == 'bpf-legacy' else 'BPF'
     routing = status.get('routing', {})
-    if routing.get('intra-host-routing-mode') != wanted or routing.get('inter-host-routing-mode') != 'Native':
-        raise ValueError(f'Active Cilium routing must be Native / {wanted}; got {routing}')
+    inter = 'Tunnel' if mode in CILIUM_TUNNEL_MODES else 'Native'
+    if routing.get('intra-host-routing-mode') != wanted or routing.get('inter-host-routing-mode') != inter:
+        raise ValueError(f'Active Cilium routing must be {inter} / {wanted}; got {routing}')
 
 
 def validate_tunnel_receipts(proof):
@@ -235,8 +236,8 @@ def main():
         save_json(output / 'cilium-config.json', config)
         data = config['data']
         validate_forwarding(data, args.mode)
-        expected_routing = 'tunnel' if args.mode == 'vxlan' else 'native'
-        expected_direct = 'false' if args.mode == 'vxlan' or args.mode in VM_VXLAN_MODES else 'true'
+        expected_routing = 'tunnel' if args.mode in CILIUM_TUNNEL_MODES else 'native'
+        expected_direct = 'false' if args.mode in CILIUM_TUNNEL_MODES or args.mode in VM_VXLAN_MODES else 'true'
         expected_mtu = mtu_profile(args.mode)['cilium_mtu']
         if (data.get('routing-mode') != expected_routing or
                 data.get('auto-direct-node-routes') != expected_direct or

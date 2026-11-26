@@ -16,18 +16,23 @@ BPF_MODES = {
 }
 HOST_BPF_MODES = ('host-vxlan-bpf-pass-1450', 'host-vxlan-bpf-1450')
 VM_BPF_MODES = tuple(m for m in BPF_MODES if m.startswith('vm-'))
-GUEST_ROUTING_MODES = VM_BPF_MODES + ('host-vxlan-routing-legacy-1450', 'host-vxlan-routing-bpf-1450')
+CILIUM_VARIANTS = {'vxlan-bridge': 'vxlan', 'vxlan-bpf': 'vxlan', 'vxlan-bridge-bpf': 'vxlan'}
+CILIUM_TUNNEL_MODES = ('vxlan',) + tuple(CILIUM_VARIANTS)
+DIRECT_BRIDGE_MODES = ('bridge-1450', 'vxlan-bridge', 'vxlan-bridge-bpf')
+GUEST_ROUTING_MODES = VM_BPF_MODES + ('host-vxlan-routing-legacy-1450', 'host-vxlan-routing-bpf-1450',
+                                     'vxlan-bpf', 'vxlan-bridge-bpf')
 VM_VXLAN_MODES = ('vm-vxlan', 'vm-vxlan-1450') + VM_BPF_MODES
 HOST_VXLAN_MODES = ('host-vxlan', 'host-vxlan-1450') + tuple(m for m,b in BPF_MODES.items() if b == 'host-vxlan-1450')
 
 
 def base_mode(mode):
-    return BPF_MODES.get(mode, mode)
+    return CILIUM_VARIANTS.get(mode, BPF_MODES.get(mode, mode))
 
 
 def forwarding_profile(mode):
     return ('bpf-legacy' if mode in ('vm-vxlan-bpf-legacy-1450', 'host-vxlan-routing-legacy-1450') else
-            'bpf' if mode in ('vm-vxlan-bpf-1450', 'host-vxlan-routing-bpf-1450') else 'baseline')
+            'bpf' if mode in ('vm-vxlan-bpf-1450', 'host-vxlan-routing-bpf-1450',
+                             'vxlan-bpf', 'vxlan-bridge-bpf') else 'baseline')
 # Inner IP MTU, guest transport NIC MTU, physical MTU, Cilium MTU override.
 # A guest doing encapsulation needs 50 extra bytes on its transport NIC.
 MTU_PROFILES = {
@@ -43,8 +48,10 @@ MTU_PROFILES = {
 }
 CONTROL_MODES = ('bridge-1450',)
 MTU_PROFILES.update({mode: MTU_PROFILES[base] for mode, base in BPF_MODES.items()})
+MTU_PROFILES.update({mode: MTU_PROFILES[base] for mode, base in CILIUM_VARIANTS.items()})
 ALL_MODES = tuple(MTU_PROFILES)
-MODES = tuple(mode for mode in ALL_MODES if mode not in CONTROL_MODES and mode not in BPF_MODES)
+MODES = tuple(mode for mode in ALL_MODES if mode not in CONTROL_MODES and mode not in BPF_MODES
+              and mode not in CILIUM_VARIANTS)
 
 
 def mtu_profile(mode):

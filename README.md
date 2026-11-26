@@ -37,6 +37,9 @@ separate host bridge pass-through/redirect modes and guest legacy/BPF host-routi
 modes. They have individual setup guides and are excluded from the default eight.
 The [host latency follow-up](docs/experiments/host-latency-optimization.md) tests
 guest BPF forwarding while retaining hypervisor VXLAN, with paired idle-policy controls.
+The [six-case VXLAN head-to-head](docs/experiments/vxlan-head-to-head.md) compares
+Cilium over macvtap, Cilium over a bridge, and host VXLAN with baseline and
+optimized profiles, including a short development smoke option.
 
 For example:
 

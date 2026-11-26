@@ -88,6 +88,13 @@ interfaces, or select an experiment.
   throughput and E queue/affinity interventions separate. Select successful
   attempts/conditions from manifests; never pool smoke/trace/profile reports
   into primary results or call BPF-plus-idle results an unoptimized mode switch.
+- `head_to_head.py` compares Cilium macvtap, Cilium direct bridge, and host VXLAN
+  under baseline/optimized profiles, with independent rebuild blocks. `--smoke`
+  is development-only, one repetition/three seconds, and never paper evidence.
+  `analyze_head_to_head.py` averages within boots before comparing rebuild means.
+  Cilium bridge modes use transport MTU 1500 and no host tunnel; host VXLAN uses
+  guest/bridge MTU 1450. Pod MTU remains 1450 in both. Keep the new variants out
+  of default MODES. See docs/experiments/vxlan-head-to-head.md for cleanup/resume.
 
 Run commands from the repository root. Keep the README short; each experiment
 belongs in its own `docs/experiments/MODE.md` with exact reset, setup, and run
