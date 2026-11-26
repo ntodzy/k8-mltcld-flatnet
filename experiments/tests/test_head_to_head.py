@@ -1,4 +1,7 @@
 import copy
+from contextlib import redirect_stdout
+import hashlib
+import io
 import json
 from pathlib import Path
 import struct
@@ -85,6 +88,16 @@ class HeadToHeadTests(unittest.TestCase):
             self.assertEqual(path_check.vxlan_packets(path,{'10.244.1.99','10.244.2.3'}),[])
             path.write_bytes(path.read_bytes()[:-1])
             with self.assertRaisesRegex(ValueError,'Truncated'):path_check.vxlan_packets(path,{'10.244.1.2','10.244.2.3'})
+
+    def test_capture_filter_limits_inner_tcp_to_both_worker_pod_networks(self):
+        expression=path_check.capture_filter(['10.244.2.0/24','10.244.3.0/24'])
+        self.assertIn('udp[39] = 6',expression)
+        self.assertIn('udp[42:4] & 0xffffff00',expression)
+        self.assertIn('udp[46:4] & 0xffffff00',expression)
+        self.assertIn('0xaf40200',expression)
+        self.assertIn('0xaf40300',expression)
+        with self.assertRaises(ValueError):path_check.capture_filter(['10.244.0.0/16','10.244.2.0/24'])
+        with self.assertRaises(ValueError):path_check.capture_filter(['10.244.2.0/24'])
 
     def test_repetitions_are_averaged_before_between_rebuild_statistics(self):
         rows=[dict(architecture='host-vxlan',profile='baseline',block=b,workload='rr',mean_us=v)
@@ -200,6 +213,38 @@ class HeadToHeadTests(unittest.TestCase):
             (root/'collection.json').write_text(json.dumps(state))
             with self.assertRaisesRegex(ValueError,'incomplete'):load(root)
             self.assertEqual(load(root,partial=True)[1],[])
+
+    def test_primary_source_revision_override_is_rejected_before_ssh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'infrastructure').mkdir()
+            config=root/'infrastructure/config.json';config.write_text('{}')
+            d=root/'result';d.mkdir()
+            state=dict(study_type='vxlan-head-to-head',smoke=False,
+                       config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),source_sha256={})
+            (d/'collection.json').write_text(json.dumps(state))
+            with patch.object(study,'ROOT',root),patch.object(study,'source_files',return_value=[]), \
+                 patch.object(sys,'argv',['head_to_head.py','--resume',str(d),'--accept-smoke-source-change','--dry-run']):
+                with self.assertRaisesRegex(ValueError,'Primary measurements'):study.main()
+
+    def test_explicit_development_revision_keeps_old_passed_attempt_and_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'infrastructure').mkdir()
+            config=root/'infrastructure/config.json';config.write_text('{}')
+            source=root/'runner.py';source.write_text('new source')
+            d=root/'result';d.mkdir()
+            state=dict(study_type='vxlan-head-to-head',smoke=True,git_snapshot='old-git',
+                       config_sha256=hashlib.sha256(config.read_bytes()).hexdigest(),source_sha256={'runner.py':'old-hash'},
+                       plan=[dict(status='passed',attempts=[dict(directory='old-attempt',status='passed')])])
+            original=json.dumps(state);(d/'collection.json').write_text(original)
+            output=io.StringIO()
+            with patch.object(study,'ROOT',root),patch.object(study,'source_files',return_value=[source]), \
+                 patch.object(sys,'argv',['head_to_head.py','--resume',str(d),'--accept-smoke-source-change','--dry-run']), \
+                 patch.object(study.subprocess,'check_output',return_value='new-git\n'),redirect_stdout(output):study.main()
+            revised=json.loads(output.getvalue().split('\n',1)[1])
+            self.assertEqual(revised['source_revisions'][0]['source_sha256'],{'runner.py':'old-hash'})
+            self.assertEqual(revised['source_revisions'][1]['git_snapshot'],'new-git')
+            self.assertEqual(revised['plan'][0]['attempts'][0]['source_revision'],0)
+            self.assertEqual((d/'collection.json').read_text(),original)
 
 
 if __name__=='__main__':unittest.main()

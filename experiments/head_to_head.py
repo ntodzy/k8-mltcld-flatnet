@@ -294,13 +294,16 @@ def execute(directory, state):
     state.pop('error', None)
     try:
         # Resuming never reuses a possibly half-tuned previous boot.
-        restore_affinity(directory)
+        preflight = directory/('preflight-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))
+        preflight.mkdir()
+        restore_affinity(preflight)
         for step in state['plan']:
             if step['status'] == 'passed':
                 continue
             work = directory/(step['name']+f'-attempt-{len(step["attempts"])+1}')
             work.mkdir()
             attempt = dict(directory=work.name, status='running', started_utc=now())
+            attempt['source_revision'] = len(state.get('source_revisions', []))-1 if state.get('source_revisions') else 0
             step['attempts'].append(attempt)
             step['status'] = 'running'
             state['phase'] = step['name']
@@ -375,6 +378,8 @@ def main():
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--accept-smoke-source-change', action='store_true',
+                        help='Resume development smoke only after a bug fix; retain immutable source revisions. Never allowed for primary data')
     args = parser.parse_args()
     if args.smoke:
         args.blocks, args.samples, args.duration = 1, 1, 3
@@ -382,13 +387,30 @@ def main():
         parser.error('Primary collection requires >=3 blocks, >=3 repetitions and 15–120 seconds; use --smoke for development')
     if args.resume and args.output:
         parser.error('--resume and --output are mutually exclusive')
+    if args.accept_smoke_source_change and not args.resume:
+        parser.error('--accept-smoke-source-change requires --resume')
     digest = hashlib.sha256((ROOT/'infrastructure/config.json').read_bytes()).hexdigest()
     hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files()}
     if args.resume:
         directory = args.resume.resolve()
         state = json.loads((directory/'collection.json').read_text())
-        if state['study_type'] != 'vxlan-head-to-head' or state['config_sha256'] != digest or state['source_sha256'] != hashes:
-            raise ValueError('Study type, source or deployment configuration changed; start a new collection')
+        if state['study_type'] != 'vxlan-head-to-head' or state['config_sha256'] != digest:
+            raise ValueError('Study type or deployment configuration changed; start a new collection')
+        if args.accept_smoke_source_change and not state['smoke']:
+            raise ValueError('Primary measurements may never resume with a changed source revision')
+        if state['source_sha256'] != hashes:
+            if not (state['smoke'] and args.accept_smoke_source_change):
+                raise ValueError('Source changed; start a new collection, or explicitly accept a development-only smoke revision')
+            revisions = state.setdefault('source_revisions', [dict(revision=0, directory='source',
+                source_sha256=state['source_sha256'], git_snapshot=state['git_snapshot'])])
+            for step in state['plan']:
+                for attempt in step['attempts']:
+                    attempt.setdefault('source_revision', len(revisions)-1)
+            revision = len(revisions)
+            revisions.append(dict(revision=revision, directory=f'source-revision-{revision}', source_sha256=hashes,
+                                  git_snapshot=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+                                  reason='Explicitly accepted development-only bug fix', accepted_utc=now()))
+            state.update(source_sha256=hashes, git_snapshot=revisions[-1]['git_snapshot'])
     else:
         directory = (args.output or ROOT/'results'/('vxlan-head-to-head-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ'))).resolve()
         active = json.loads((GENERATED/'active-experiment.json').read_text())
@@ -418,6 +440,15 @@ def main():
                 dest = directory/'source'/name
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes((ROOT/name).read_bytes())
+        elif state.get('source_revisions'):
+            revision = state['source_revisions'][-1]
+            snapshot = directory/revision['directory']
+            if not snapshot.exists():
+                snapshot.mkdir()
+                for name in hashes:
+                    dest = snapshot/name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes((ROOT/name).read_bytes())
         if args.background:
             write_manifest(directory, state)
             sys.stdout.flush()

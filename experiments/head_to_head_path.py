@@ -11,6 +11,18 @@ from common import GENERATED, ROOT, CILIUM_TUNNEL_MODES, guests, remote, save_js
 from diagnostics import Monitor
 
 
+def capture_filter(cidrs):
+    """Match inner Pod TCP, excluding node/control-plane traffic from the cap."""
+    networks = [ipaddress.IPv4Network(cidr) for cidr in cidrs]
+    if len(networks) != 2 or networks[0].overlaps(networks[1]):
+        raise ValueError('Two disjoint worker Pod CIDRs are required')
+    def match(offset, network):
+        return f'(udp[{offset}:4] & {int(network.netmask):#x}) = {int(network.network_address):#x}'
+    a,b = networks
+    return ('udp and (port 8472 or port 4789) and udp[39] = 6 and ('+
+            f'({match(42,a)} and {match(46,b)}) or ({match(42,b)} and {match(46,a)}))')
+
+
 def vxlan_packets(path, endpoint_ips):
     """Inspect Ethernet/IPv4 PCAP headers, including VLANs; no packet dependency."""
     def ipv4(frame, offset):
@@ -75,6 +87,15 @@ def validate_path(directory, mode, smoke=False):
     source = json.loads((ROOT/'infrastructure/config.json').read_text())
     cilium = mode in CILIUM_TUNNEL_MODES
     port = 8472 if cilium else 4789
+    from run import KUBECTL
+    controller = next(name for name,h in inventory.items() if h['cs740_role']=='controller')
+    nodes = json.loads(remote(GENERATED/'ssh_config', controller, KUBECTL+
+                             ['get','nodes','worker-1','worker-2','-o','json']))
+    cidrs = {n['metadata']['name']:n['spec']['podCIDR'] for n in nodes['items']}
+    if set(cidrs) != {'worker-1','worker-2'}:
+        raise ValueError('Cannot identify the two worker Pod CIDRs')
+    packet_filter = capture_filter([cidrs['worker-1'],cidrs['worker-2']])
+    save_json(directory/'capture-filter.json', dict(worker_pod_cidrs=cidrs, filter=packet_filter))
     monitors = {}
     try:
         for vm in ('worker-1', 'worker-2'):
@@ -85,7 +106,7 @@ def validate_path(directory, mode, smoke=False):
                 raise RuntimeError('Capture monitor failed: '+host['name'])
             # Fixed packet count bounds capture size; all capture data is excluded.
             monitor.control(json.dumps({'capture': dict(interface=host['network']['source'], direction='out',
-                packet_limit=2000, filter='udp and (port 8472 or port 4789)')}))
+                packet_limit=2000, filter=packet_filter)}))
             deadline = time.monotonic()+20
             while not any(r['kind'] == 'capture_started' for r in monitor.records):
                 if monitor.error or monitor.process.poll() is not None or time.monotonic() > deadline:

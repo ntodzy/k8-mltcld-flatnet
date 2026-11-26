@@ -53,7 +53,8 @@ def load(directory, partial=False):
                         raise ValueError('Duplicate metric in one workload')
                     values[item['metric']] = item['value']
                 row = dict(architecture=step['architecture'], profile=step['profile'], block=step['block'],
-                           repetition=sample, workload=workload, source=str(trial), warnings=sorted(warnings))
+                           repetition=sample, workload=workload, source=str(trial), warnings=sorted(warnings),
+                           source_revision=attempt.get('source_revision', 0))
                 for metric, (wanted, key, scale) in METRICS.items():
                     if workload == wanted:
                         if key not in values:
@@ -164,6 +165,10 @@ def report(directory, output, partial=False, plots=True):
              'Physical captures and their validation benchmarks are excluded.', '',
              '| Architecture | Mean RR baseline µs | Mean RR optimized µs | P99 baseline µs | P99 optimized µs | Single baseline Gb/s | Single optimized Gb/s | Four baseline Gb/s | Four optimized Gb/s |',
              '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+    if state.get('source_revisions'):
+        lines.insert(4, 'Development source revisions: '+str(len(state['source_revisions']))+
+                     '. Earlier passed smoke cases are retained across explicit bug fixes; source revision identity remains in observations. '
+                     'These mixed development revisions must never be interpreted as an efficacy comparison.\n')
     for architecture in ARCHITECTURES:
         cells = []
         for metric in ('mean_us','p99_us','single_gbps','four_gbps'):

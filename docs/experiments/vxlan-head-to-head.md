@@ -91,6 +91,10 @@ and full-size inner traffic. A DF ping tests the outer transport MTU. Guest
 tunnel devices and host bridge membership establish placement. Egress captures
 can contain GSO super-packets, so captured lengths are not exact wire lengths.
 The custom host TC program and intrusive kernel tracing are not needed here.
+Capture filters select inner IPv4 TCP between the two workers' live Pod CIDRs
+before applying the 2,000-packet limit; node/control-plane traffic must not fill
+that cap during pod startup. The parser then requires the exact benchmark Pod
+IP pair. These offsets assume the untagged inner Ethernet/IPv4 VXLAN used here.
 
 ## Status, failures, and resume
 
@@ -106,8 +110,18 @@ python3 experiments/head_to_head.py --resume results/vxlan-head-to-head-TIMESTAM
 
 Each cell is an atomic attempt. A failure retries that entire cell, including a
 fresh reset; partial workloads from the failed attempt are retained but excluded.
-Resume rejects deployment/source changes; a bug fix requires a new collection,
-so previously passed observations cannot silently mix implementations. Source
+Primary resume rejects deployment/source changes; a bug fix requires a new
+primary collection, so passed observations cannot silently mix implementations.
+For development smoke only, a deliberate bug-fix resume is available:
+
+```bash
+python3 experiments/head_to_head.py --resume results/vxlan-head-to-head-TIMESTAMP \
+  --accept-smoke-source-change --background
+```
+
+This retains earlier source snapshots and attempt identities, records a new
+source revision, retries the failed cell, and keeps the entire output labeled
+development-only. The override is rejected for primary data. Source
 copies, hashes, the Git snapshot, settings, setup logs and retry history are saved.
 Only one collection may own the shared lock. SIGTERM/SIGINT trigger cleanup;
 hard kills cannot guarantee immediate affinity restoration, although idle leases

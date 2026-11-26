@@ -18,6 +18,16 @@ unit checks currently pass 131 tests (one optional dependency skip); Ansible
 syntax checks and the optimized VXLAN cluster validation pass. The master
 report renderer was checked with synthetic data under /tmp, not research data.
 No primary collection has started. Final live status will be recorded below.
+The initial smoke passed optimized Cilium/macvtap and optimized host VXLAN,
+then stopped during baseline host path validation: control-plane traffic filled
+the 2,000-frame capture cap before benchmark traffic on one host. All retained
+PCAPs/failed attempts are preserved. The fix filters inner TCP to both worker
+Pod CIDRs, then still validates exact benchmark Pod IPs. The workflow is restoring
+the host baseline before a deliberate development-only source-revision resume.
+Primary source changes still require a new collection. Latest checks: 137 tests,
+one optional dependency skip. Baseline live agents were separately verified as
+kube-proxy replacement False / masquerading iptables; supplemental proof is
+in the failed baseline attempt's additional-profile-proof.json.
 Older
 completed studies and reports below remain valid historical evidence.
 
