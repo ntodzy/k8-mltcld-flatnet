@@ -1,5 +1,33 @@
 # Work handoff
 
+## ACTIVE: primary VXLAN head-to-head — November 27
+
+The user explicitly authorized running and supervising the FULL primary study,
+then producing the master table, charts and a separate latency/throughput impact
+analysis. This supersedes the older instruction below not to start primary work.
+Keep measurement source fixed except necessary bug fixes; commit locally, no push.
+Use local scripted polling and compact checkpoint/failure summaries to conserve
+tokens. Do not mix any smoke data into performance evidence.
+
+- Collection: `results/vxlan-head-to-head-20261127T204024.237020Z/`.
+- Started with `python3 experiments/head_to_head.py --background`; PID1957115.
+  Before starting, shared collection lock was free, no primary study existed,
+  working tree was clean, and both hypervisors were verified reachable.
+- Fixed source snapshot ec87ccf; primary quality, smoke=false, 3 rebuild blocks,
+  all 6 architecture/profile cells per block, 5 repetitions × RR/single/four-stream
+  per cell at 30 seconds: 18 cells / 270 ordinary measured invocations.
+- Initial/final baseline is host-vxlan-1450. The coordinator restores affinity,
+  queues, architecture and idle QoS and keeps status running through restoration.
+- Status: `python3 experiments/status.py --directory RESULTS_DIR`.
+  Do NOT start another setup/collection while this owns the shared lock.
+- After passed completion: existing `analyze_head_to_head.py RESULTS_DIR --output
+  RESULTS_DIR/analysis-primary` produces tables, contrasts, CSV/JSON and SVG/PNG.
+  Add an evidence-based impact narrative, verify live baseline restoration and
+  update this handoff/results guide. Failed attempts and instrumented captures
+  remain separate; primary source changes require a new collection.
+
+The older completed sections below are historical, not current stop instructions.
+
 ## Completed: six-cell VXLAN head-to-head implementation — November 25
 
 The user explicitly authorized implementing the planned comparison and reducing
